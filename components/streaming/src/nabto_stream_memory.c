@@ -1,6 +1,6 @@
-#include "nabto_stream_memory.h"
-#include "nabto_stream_window.h"
-#include "nabto_stream_util.h"
+#include <streaming/nabto_stream_memory.h>
+#include <streaming/nabto_stream_window.h>
+#include <streaming/nabto_stream_util.h>
 
 
 void nabto_stream_free_send_segment(struct nabto_stream* stream, struct nabto_stream_send_segment* segment)

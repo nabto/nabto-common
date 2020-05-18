@@ -1,4 +1,4 @@
-#include "mdns_server.h"
+#include <mdns/mdns_server.h>
 
 static const uint8_t* nabto_mdns_server_uint8_read_forward(const uint8_t* buf, const uint8_t* end, uint8_t* val);
 static const uint8_t* nabto_mdns_server_uint16_read_forward(const uint8_t* buf, const uint8_t* end, uint16_t* val);

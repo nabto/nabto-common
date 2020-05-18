@@ -1,4 +1,4 @@
-#include "nabto_stun_client.h"
+#include <stun/nabto_stun_client.h>
 #include <string.h>
 
 #ifndef NABTO_STUN_SEND_TIMEOUT

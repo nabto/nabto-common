@@ -1,6 +1,6 @@
-#include "nabto_stream_log.h"
+#include <streaming/nabto_stream_log.h>
 
-#include "nabto_stream_window.h"
+#include <streaming/nabto_stream_window.h>
 
 #ifndef HAS_VARIADIC_MACROS
 void nabto_stream_log_trace_adapter(struct nabto_stream* stream, const char* fmt, ...)

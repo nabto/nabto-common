@@ -1,6 +1,6 @@
-#include "nabto_stream_log_helper.h"
-#include "nabto_stream_window.h"
-#include "nabto_stream_protocol.h"
+#include <streaming/nabto_stream_log_helper.h>
+#include <streaming/nabto_stream_window.h>
+#include <streaming/nabto_stream_protocol.h>
 
 #include <stdio.h>
 #include <string.h>

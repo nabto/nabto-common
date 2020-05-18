@@ -1,6 +1,6 @@
-#include "nabto_stun_log.h"
+#include <stun/nabto_stun_log.h>
 
-#include "nabto_stun_client.h"
+#include <stun/nabto_stun_client.h>
 
 #ifndef HAS_VARIADIC_MACROS
 void nabto_stun_log_trace_adapter(struct nabto_stun* stun, const char* fmt, ...)

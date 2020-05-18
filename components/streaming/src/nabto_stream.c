@@ -7,13 +7,12 @@
  * Nabto uServer stream - Implementation.
  */
 
-#include "nabto_stream.h"
-
-#include "nabto_stream_window.h"
-#include "nabto_stream_interface.h"
-#include "nabto_stream_util.h"
-#include "nabto_stream_memory.h"
-#include "nabto_stream_log_helper.h"
+#include <streaming/nabto_stream.h>
+#include <streaming/nabto_stream_window.h>
+#include <streaming/nabto_stream_interface.h>
+#include <streaming/nabto_stream_util.h>
+#include <streaming/nabto_stream_memory.h>
+#include <streaming/nabto_stream_log_helper.h>
 
 #include <string.h>
 

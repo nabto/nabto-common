@@ -7,16 +7,16 @@
  * Nabto uServer stream packet on unreliable con - Implementation.
  */
 
-#include "nabto_stream.h"
-#include "nabto_stream_window.h"
-#include "nabto_stream_protocol.h"
-#include "nabto_stream_interface.h"
-#include "nabto_stream_util.h"
-#include "nabto_stream_log.h"
-#include "nabto_stream_congestion_control.h"
-#include "nabto_stream_flow_control.h"
-#include "nabto_stream_memory.h"
-#include "nabto_stream_log_helper.h"
+#include <streaming/nabto_stream.h>
+#include <streaming/nabto_stream_window.h>
+#include <streaming/nabto_stream_protocol.h>
+#include <streaming/nabto_stream_interface.h>
+#include <streaming/nabto_stream_util.h>
+#include <streaming/nabto_stream_log.h>
+#include <streaming/nabto_stream_congestion_control.h>
+#include <streaming/nabto_stream_flow_control.h>
+#include <streaming/nabto_stream_memory.h>
+#include <streaming/nabto_stream_log_helper.h>
 
 #include <string.h>
 #include <math.h>

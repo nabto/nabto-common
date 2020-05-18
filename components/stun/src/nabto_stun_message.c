@@ -1,5 +1,5 @@
 
-#include "nabto_stun_message.h"
+#include <stun/nabto_stun_message.h>
 #include <string.h>
 
 #ifdef __cplusplus

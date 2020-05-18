@@ -1,6 +1,6 @@
-#include "nabto_stream_flow_control.h"
-#include "nabto_stream_window.h"
-#include "nabto_stream_util.h"
+#include <streaming/nabto_stream_flow_control.h>
+#include <streaming/nabto_stream_window.h>
+#include <streaming/nabto_stream_util.h>
 
 void nabto_stream_flow_control_advertised_window_reduced(struct nabto_stream* stream)
 {

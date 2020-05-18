@@ -12,4 +12,4 @@ set(src
 
 add_library(nabto_stream "${src}")
 
-target_include_directories(nabto_stream include)
+target_include_directories(nabto_stream PUBLIC include)
