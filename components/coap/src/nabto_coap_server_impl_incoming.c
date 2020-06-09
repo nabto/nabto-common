@@ -208,16 +208,15 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server* server,
         request->contentFormat = message->contentFormat;
     }
 
+    if (message->type == NABTO_COAP_TYPE_CON && !request->hasBlock1Ack) {
+        server->ackConnection = request->connection;
+        server->ackMessageId = message->messageId;
+    }
 
     if (block1Done) {
         struct nabto_coap_server_resource* resource = request->resource;
         request->state = NABTO_COAP_SERVER_REQUEST_STATE_USER;
         resource->handler(request, resource->handlerUserData);
-    }
-
-    if (message->type == NABTO_COAP_TYPE_CON && !request->hasBlock1Ack) {
-        server->ackConnection = request->connection;
-        server->ackMessageId = message->messageId;
     }
 }
 
