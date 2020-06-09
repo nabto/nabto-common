@@ -537,7 +537,7 @@ nabto_coap_error nabto_coap_server_response_ready(struct nabto_coap_server_reque
     if (request->connection == NULL) {
         // the connection is removed.
         request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
-        nabto_coap_server_free_request(request);
+        //nabto_coap_server_free_request(request);
         return NABTO_COAP_ERROR_NO_CONNECTION;
     } else {
         request->state = NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE;
