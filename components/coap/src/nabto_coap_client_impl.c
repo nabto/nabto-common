@@ -665,6 +665,7 @@ void nabto_coap_client_remove_connection(struct nabto_coap_client* client, void 
         }
         request = request->next;
     }
+    client->notifyEvent(client->userData);
 }
 
 
