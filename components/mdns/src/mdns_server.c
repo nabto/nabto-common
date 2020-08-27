@@ -219,12 +219,21 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     const char* uniqueId = create_unique_id(context);
     size_t uniqueIdLength = strlen(uniqueId);
 
+    uint16_t records = 0;
+    records += 1; // PTR _nabto._udp.local.
+    records += 1; // PTR p-abcdexyz-d-xyzabcde._sub._nabto._udp.local.
+    records += 1; // PTR _services._dns-sd._udp.local.
+    records += 1; // TXT p-abcdexyz-d-xyzabcde._nabto._udp.local.
+    records += 1; // SRV p-abcdexyz-d-xyzabcde._nabto._udp.local.
+    records += ipsSize; // A, AAAA p-abcdexyz-d-xyzabcde.local
+    records += context->subtypesSize; // additional subtypes
+
     // insert header
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, id);
     uint16_t flags = (1 << 15) + (1 << 10); // response flag & Authoritative flag
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, flags);
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 0); // 0 questions
-    ptr = nabto_mdns_server_uint16_write_forward(ptr, end, (uint16_t)(4+ipsSize)); // 2x PTR, SRV, TXT, ipSizex a(aaa)
+    ptr = nabto_mdns_server_uint16_write_forward(ptr, end, records);
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 0); // 0 authority response records
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 0); // 0 additional response records
 
@@ -298,6 +307,15 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     size_t txtDataLen =
         1+strlen(deviceTxt)+strlen(context->deviceId) +
         1+strlen(productTxt)+strlen(context->productId);
+
+    for (size_t i = 0; i < context->txtItemsSize; i++) {
+        // format length(1byte) name=value
+        txtDataLen += 1; // length byte
+        txtDataLen += strlen(context->txtItems[i].key);
+        txtDataLen += 1; // strlen("=")
+        txtDataLen += strlen(context->txtItems[i].value);
+    }
+
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, (uint16_t)txtDataLen);
     // manually inserting strings to concat
     ptr = nabto_mdns_server_uint8_write_forward(ptr, end, (uint8_t)(strlen(deviceTxt)+strlen(context->deviceId)));
@@ -307,6 +325,18 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     ptr = nabto_mdns_server_uint8_write_forward(ptr, end, (uint8_t)(strlen(productTxt)+strlen(context->productId)));
     ptr = nabto_mdns_server_string_write_forward(ptr, end, productTxt);
     ptr = nabto_mdns_server_string_write_forward(ptr, end, context->productId);
+
+    for (size_t i = 0; i < context->txtItemsSize; i++) {
+        size_t l = strlen(context->txtItems[i].key) + 1 + strlen(context->txtItems[i].value);
+        if (l > 255) {
+            return false;
+        }
+        ptr = nabto_mdns_server_uint8_write_forward(ptr, end, (uint8_t)l);
+        ptr = nabto_mdns_server_string_write_forward(ptr, end, context->txtItems[i].key);
+        ptr = nabto_mdns_server_string_write_forward(ptr, end, "=");
+        ptr = nabto_mdns_server_string_write_forward(ptr, end, context->txtItems[i].value);
+
+    }
 
     // insert a(aaa) records
     for (uint8_t i = 0; i < ipsSize; i++) {
