@@ -17,7 +17,22 @@ void nabto_mdns_server_init(struct nabto_mdns_server_context* context,
 {
     context->deviceId = deviceId;
     context->productId = productId;
+    context->subtypesSize = 0;
+    context->txtItemsSize = 0;
 }
+
+void nabto_mdns_server_update_info(struct nabto_mdns_server_context* context,
+                                   const char* subtypes[],
+                                   size_t subtypesSize,
+                                   struct nabto_mdns_server_txt_item txtItems[],
+                                   size_t txtItemsSize)
+{
+    context->subtypes = subtypes;
+    context->subtypesSize = subtypesSize;
+    context->txtItems = txtItems;
+    context->txtItemsSize = txtItemsSize;
+}
+
 
 static bool match_label(const uint8_t* bufferLabel, size_t bufferLabelSize, const char* label)
 {
@@ -57,7 +72,9 @@ static const bool match_name(const uint8_t* buffer, const uint8_t* end, const ui
         }
 
         if (match_label(ptr, length, label)) {
-            return match_name(buffer, end, ptr, toMatch++);
+            size_t labelLength = strlen(label);
+
+            return match_name(buffer, end, (ptr+labelLength), (toMatch+1));
         } else {
             return false;
         }
@@ -133,34 +150,34 @@ bool nabto_mdns_server_handle_packet(struct nabto_mdns_server_context* context,
     ptr += 6;
 
     for (int i = 0; i < questions; i++) {
-        uint8_t length;
-        ptr = nabto_mdns_server_uint8_read_forward(ptr, end, &length);
-        if (ptr == NULL) {
-            return false;
-        }
-        if (length == strlen("_nabto") && memcmp(ptr, "_nabto", strlen("_nabto")) == 0) {
-            // nabto question
-            return true;
-        } else if (length == strlen("_services") && memcmp(ptr, "_services", strlen("_services")) == 0) {
-            // services question
-            return true;
-        }
 
         if (match_name(buffer, end, ptr, (const char*[]){ "_nabto", "_udp", "local", NULL } )) {
             return true;
-        } else if (match_name(buffer, end, ptr, (const char*[]){ "heatpump", "_sub", "_nabto", "_udp", "local", NULL } )) {
-            return true;
-        } else if (match_name(buffer, end, ptr, (const char*[]){ uniqueId, "_sub", "_nabto", "_udp", "local", NULL } )) {
-            return true;
-        } else if (match_name(buffer, end, ptr, (const char*[]){ uniqueId, "_nabto", "_udp", "local", NULL } )) {
-            return true;
-        } else if (match_name(buffer, end, ptr, (const char*[]){ uniqueId, "local", NULL } )) {
-            return true;
-        } else if (match_name(buffer, end, ptr, (const char*[]){ "_services", "_dns-sd", "_udp", "local", NULL })) {
-            return true;
-        } else {
-            // No match
         }
+
+        if (match_name(buffer, end, ptr, (const char*[]){ uniqueId, "_sub", "_nabto", "_udp", "local", NULL } )) {
+            return true;
+        }
+
+        if (match_name(buffer, end, ptr, (const char*[]){ uniqueId, "_nabto", "_udp", "local", NULL } )) {
+            return true;
+        }
+
+        if (match_name(buffer, end, ptr, (const char*[]){ uniqueId, "local", NULL } )) {
+            return true;
+        }
+
+        if (match_name(buffer, end, ptr, (const char*[]){ "_services", "_dns-sd", "_udp", "local", NULL })) {
+            return true;
+        }
+
+        for (size_t i = 0; i < context->subtypesSize; i++) {
+            if (match_name(buffer, end, ptr, (const char*[]){context->subtypes[i], "_sub", "_nabto", "_udp", "local", NULL })) {
+                return true;
+            }
+        }
+
+        // no match for this question.
 
         ptr = skip_name(ptr, end);
         // skip type, class
@@ -182,10 +199,13 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     uint8_t* ptr = buffer;
     uint8_t* end = buffer + bufferSize;
 
-    uint16_t serviceLabel;
-    uint16_t domainLabel;
-    uint16_t localLabel;
-    uint16_t udpLabel;
+    uint16_t subLabel; // _sub._nabto._udp.local.
+    uint16_t serviceLabel; // <uniqueid>._nabto._udp.local.
+    uint16_t domainLabel; // <uniqueid>.local.
+    uint16_t nabtoLabel; // _nabto._udp.local.
+    uint16_t udpLabel; // _udp.local.
+    uint16_t localLabel; // local.
+
     const char* deviceTxt = "deviceId=";
     const char* productTxt = "productId=";
 
@@ -209,6 +229,7 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 0); // 0 additional response records
 
     // insert ptr record for nabto
+    nabtoLabel = 0xC000 + (uint16_t)(ptr - buffer);
     ptr = nabto_mdns_server_encode_string(ptr, end, "_nabto");
     udpLabel = 0xC000 + (uint16_t)(ptr - buffer);
     ptr = nabto_mdns_server_encode_string(ptr, end, "_udp");
@@ -222,6 +243,29 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     serviceLabel = 0xC000 + (uint16_t)(ptr - buffer);
     ptr = nabto_mdns_server_encode_string(ptr, end, uniqueId);
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 0xC00C); // Compression label (0xC000 + header size)
+
+    // insert ptr for instance subtype
+    ptr = nabto_mdns_server_encode_string(ptr, end, uniqueId);
+    subLabel = 0xC000 + (uint16_t)(ptr - buffer);
+    ptr = nabto_mdns_server_encode_string(ptr, end, "_sub");
+    ptr = nabto_mdns_server_uint16_write_forward(ptr, end, nabtoLabel); // Compression label
+    ptr = nabto_mdns_server_uint16_write_forward(ptr, end, NABTO_MDNS_PTR);
+    ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 1); // IN class
+    ptr = nabto_mdns_server_uint32_write_forward(ptr, end, 120); // TTL
+    ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 2); // size of compression label
+    ptr = nabto_mdns_server_uint16_write_forward(ptr, end, serviceLabel);
+
+    // insert ptrs for custom subtypes
+
+    for (size_t i = 0; i < context->subtypesSize; i++) {
+        ptr = nabto_mdns_server_encode_string(ptr, end, context->subtypes[i]);
+        ptr = nabto_mdns_server_uint16_write_forward(ptr, end, subLabel); // Compression label
+        ptr = nabto_mdns_server_uint16_write_forward(ptr, end, NABTO_MDNS_PTR);
+        ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 1); // IN class
+        ptr = nabto_mdns_server_uint32_write_forward(ptr, end, 120); // TTL
+        ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 2); // size of compression label
+        ptr = nabto_mdns_server_uint16_write_forward(ptr, end, serviceLabel);
+    }
 
     // insert ptr record for service discovery
     ptr = nabto_mdns_server_encode_string(ptr, end, "_services");

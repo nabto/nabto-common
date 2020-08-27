@@ -51,6 +51,7 @@ struct nabto_mdns_server_txt_item {
 struct nabto_mdns_server_context {
     const char* deviceId;
     const char* productId;
+    const char* friendlyName;
     const char** subtypes;
     size_t subtypesSize;
     struct nabto_mdns_server_txt_item* txtItems;
@@ -103,12 +104,11 @@ void nabto_mdns_server_init(struct nabto_mdns_server_context* context,
 /**
  * Add a service to the mdns server
  */
-
-void nabto_mdns_server_update(struct nabto_mdns_server_context* context,
-                              const char* subtypes[],
-                              size_t subtypesSize,
-                              struct nabto_mdns_server_txt_item txtItems[],
-                              size_t txtItemsSize);
+void nabto_mdns_server_update_info(struct nabto_mdns_server_context* context,
+                                   const char* subtypes[],
+                                   size_t subtypesSize,
+                                   struct nabto_mdns_server_txt_item txtItems[],
+                                   size_t txtItemsSize);
 
 /**
  * Hande incoming packet from multicast socket
