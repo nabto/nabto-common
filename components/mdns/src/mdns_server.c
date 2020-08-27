@@ -206,8 +206,8 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     uint16_t udpLabel; // _udp.local.
     uint16_t localLabel; // local.
 
-    const char* deviceTxt = "deviceId=";
-    const char* productTxt = "productId=";
+    const char* deviceTxt = "deviceid=";
+    const char* productTxt = "productid=";
 
     uint16_t cacheFlushBit;
     if (unicastResponse) {
@@ -218,6 +218,8 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
 
     const char* uniqueId = create_unique_id(context);
     size_t uniqueIdLength = strlen(uniqueId);
+
+    uint32_t ttl = 120;
 
     uint16_t records = 0;
     records += 1; // PTR _nabto._udp.local.
@@ -247,7 +249,7 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     *ptr = 0; ptr++; // terminate labels
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, NABTO_MDNS_PTR);
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 1); // IN class
-    ptr = nabto_mdns_server_uint32_write_forward(ptr, end, 120); // TTL
+    ptr = nabto_mdns_server_uint32_write_forward(ptr, end, ttl); // TTL
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, (uint16_t)(uniqueIdLength+3)); // size of (service name length (1byte) + service name + compression label(2bytes))
     serviceLabel = 0xC000 + (uint16_t)(ptr - buffer);
     ptr = nabto_mdns_server_encode_string(ptr, end, uniqueId);
@@ -260,7 +262,7 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, nabtoLabel); // Compression label
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, NABTO_MDNS_PTR);
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 1); // IN class
-    ptr = nabto_mdns_server_uint32_write_forward(ptr, end, 120); // TTL
+    ptr = nabto_mdns_server_uint32_write_forward(ptr, end, ttl); // TTL
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 2); // size of compression label
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, serviceLabel);
 
@@ -271,7 +273,7 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
         ptr = nabto_mdns_server_uint16_write_forward(ptr, end, subLabel); // Compression label
         ptr = nabto_mdns_server_uint16_write_forward(ptr, end, NABTO_MDNS_PTR);
         ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 1); // IN class
-        ptr = nabto_mdns_server_uint32_write_forward(ptr, end, 120); // TTL
+        ptr = nabto_mdns_server_uint32_write_forward(ptr, end, ttl); // TTL
         ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 2); // size of compression label
         ptr = nabto_mdns_server_uint16_write_forward(ptr, end, serviceLabel);
     }
@@ -282,7 +284,7 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, udpLabel); // Compression label
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, NABTO_MDNS_PTR);
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 1); // IN class
-    ptr = nabto_mdns_server_uint32_write_forward(ptr, end, 120); // TTL
+    ptr = nabto_mdns_server_uint32_write_forward(ptr, end, ttl); // TTL
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 2); // size of compression label
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 0xC00C); // Compression label (0xC000 + header size)
 
@@ -290,7 +292,7 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, serviceLabel); // service name
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, NABTO_MDNS_SRV);
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 1 + cacheFlushBit); // IN class + cache flush
-    ptr = nabto_mdns_server_uint32_write_forward(ptr, end, 120); // TTL
+    ptr = nabto_mdns_server_uint32_write_forward(ptr, end, ttl); // TTL
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, (uint16_t)(6+1+uniqueIdLength+2)); // size of (prio(2bytes) + weight(2bytes) + port(2bytes) + hostname(length(1bytes + string)) + compression label(2bytes))
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 0); // prio
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 0); // weight
@@ -303,7 +305,7 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, serviceLabel); // Compression label
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, NABTO_MDNS_TXT);
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 1 + cacheFlushBit); // IN class + cache flush
-    ptr = nabto_mdns_server_uint32_write_forward(ptr, end, 120); // TTL
+    ptr = nabto_mdns_server_uint32_write_forward(ptr, end, ttl); // TTL
     size_t txtDataLen =
         1+strlen(deviceTxt)+strlen(context->deviceId) +
         1+strlen(productTxt)+strlen(context->productId);
@@ -345,13 +347,13 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
         if (ips[i].type == NABTO_MDNS_IPV4) {
             ptr = nabto_mdns_server_uint16_write_forward(ptr, end, NABTO_MDNS_A);
             ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 1 + cacheFlushBit); // IN class + cache flush
-            ptr = nabto_mdns_server_uint32_write_forward(ptr, end, 120); // TTL
+            ptr = nabto_mdns_server_uint32_write_forward(ptr, end, ttl); // TTL
             ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 4); // size of ipv4
             ptr = nabto_mdns_server_data_write_forward(ptr, end, ips[i].v4.addr, 4);
         } else if (ips[i].type == NABTO_MDNS_IPV6) {
             ptr = nabto_mdns_server_uint16_write_forward(ptr, end, NABTO_MDNS_AAAA);
             ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 1 + cacheFlushBit); // IN class + cache flush
-            ptr = nabto_mdns_server_uint32_write_forward(ptr, end, 120); // TTL
+            ptr = nabto_mdns_server_uint32_write_forward(ptr, end, ttl); // TTL
             ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 16); // size of ipv6
             ptr = nabto_mdns_server_data_write_forward(ptr, end, ips[i].v6.addr, 16);
         } else {
