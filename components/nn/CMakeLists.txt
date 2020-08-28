@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.2)
 project(nn)
 
-option(NN_BUILD_TESTS "build nn test program" ON)
+option(NN_BUILD_TESTS "build nn test program" OFF)
 
 
 
