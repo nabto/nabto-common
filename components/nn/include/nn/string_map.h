@@ -96,7 +96,7 @@ bool nn_string_map_is_end(const struct nn_string_map_iterator* it);
  */
 void nn_string_map_next(struct nn_string_map_iterator* it);
 
-#define NN_STRING_MAP_FOREACH(item, map) for(struct nn_string_map_iterator it = nn_string_map_front2(map); item = nn_string_map_get_element(&it), !nn_string_map_end(&it); nn_string_map_next(&it))
+#define NN_STRING_MAP_FOREACH(it, map) for(it = nn_string_map_begin(map); !nn_string_map_is_end(&it); nn_string_map_next(&it))
 
 #ifdef __cplusplus
 } //extern "C"

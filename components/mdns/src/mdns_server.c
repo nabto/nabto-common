@@ -1,5 +1,8 @@
 #include <mdns/mdns_server.h>
 
+#include <nn/string_map.h>
+#include <nn/string_set.h>
+
 static const uint8_t* nabto_mdns_server_uint8_read_forward(const uint8_t* buf, const uint8_t* end, uint8_t* val);
 static const uint8_t* nabto_mdns_server_uint16_read_forward(const uint8_t* buf, const uint8_t* end, uint16_t* val);
 
@@ -12,25 +15,19 @@ static uint8_t* nabto_mdns_server_string_write_forward(uint8_t* buf, uint8_t* en
 
 static uint8_t* nabto_mdns_server_encode_string(uint8_t* buf, uint8_t* end, const char* string);
 
-void nabto_mdns_server_init(struct nabto_mdns_server_context* context,
-                            const char* deviceId, const char* productId)
+void nabto_mdns_server_init(struct nabto_mdns_server_context* context)
 {
-    context->deviceId = deviceId;
-    context->productId = productId;
-    context->subtypesSize = 0;
-    context->txtItemsSize = 0;
+    memset(context, 0, sizeof(struct nabto_mdns_server_context));
 }
 
 void nabto_mdns_server_update_info(struct nabto_mdns_server_context* context,
-                                   const char* subtypes[],
-                                   size_t subtypesSize,
-                                   struct nabto_mdns_server_txt_item txtItems[],
-                                   size_t txtItemsSize)
+                                   const char* instanceName,
+                                   struct nn_string_set* subtypes,
+                                   struct nn_string_map* txtItems)
 {
+    context->instanceName = instanceName;
     context->subtypes = subtypes;
-    context->subtypesSize = subtypesSize;
     context->txtItems = txtItems;
-    context->txtItemsSize = txtItemsSize;
 }
 
 
@@ -107,21 +104,6 @@ static const uint8_t* skip_name(const uint8_t* ptr, const uint8_t* end)
     return ptr;
 }
 
-const char* create_unique_id(struct nabto_mdns_server_context* context)
-{
-    static char buffer[64];
-    char* ptr = buffer;
-    if ((strlen(context->productId) + strlen(context->deviceId)) > 61) {
-        return NULL;
-    }
-    strcpy(ptr, context->productId);
-    ptr += strlen(context->productId);
-    ptr = strcpy(ptr, "-");
-    ptr += 1;
-    ptr = strcpy(ptr, context->deviceId);
-    return buffer;
-}
-
 bool nabto_mdns_server_handle_packet(struct nabto_mdns_server_context* context,
                                      const uint8_t* buffer, size_t bufferSize, uint16_t* id)
 {
@@ -144,7 +126,7 @@ bool nabto_mdns_server_handle_packet(struct nabto_mdns_server_context* context,
         return false;
     }
 
-    const char* uniqueId = create_unique_id(context);
+    const char* instanceName = context->instanceName;
 
     // skip answer, nameservers and additional resources
     ptr += 6;
@@ -155,15 +137,11 @@ bool nabto_mdns_server_handle_packet(struct nabto_mdns_server_context* context,
             return true;
         }
 
-        if (match_name(buffer, end, ptr, (const char*[]){ uniqueId, "_sub", "_nabto", "_udp", "local", NULL } )) {
+        if (match_name(buffer, end, ptr, (const char*[]){ instanceName, "_nabto", "_udp", "local", NULL } )) {
             return true;
         }
 
-        if (match_name(buffer, end, ptr, (const char*[]){ uniqueId, "_nabto", "_udp", "local", NULL } )) {
-            return true;
-        }
-
-        if (match_name(buffer, end, ptr, (const char*[]){ uniqueId, "local", NULL } )) {
+        if (match_name(buffer, end, ptr, (const char*[]){ instanceName, "local", NULL } )) {
             return true;
         }
 
@@ -171,8 +149,9 @@ bool nabto_mdns_server_handle_packet(struct nabto_mdns_server_context* context,
             return true;
         }
 
-        for (size_t i = 0; i < context->subtypesSize; i++) {
-            if (match_name(buffer, end, ptr, (const char*[]){context->subtypes[i], "_sub", "_nabto", "_udp", "local", NULL })) {
+        const char* subtype;
+        NN_STRING_SET_FOREACH(subtype, context->subtypes) {
+            if (match_name(buffer, end, ptr, (const char*[]){subtype, "_sub", "_nabto", "_udp", "local", NULL })) {
                 return true;
             }
         }
@@ -206,9 +185,6 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     uint16_t udpLabel; // _udp.local.
     uint16_t localLabel; // local.
 
-    const char* deviceTxt = "deviceid=";
-    const char* productTxt = "productid=";
-
     uint16_t cacheFlushBit;
     if (unicastResponse) {
         cacheFlushBit = 0;
@@ -216,19 +192,18 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
         cacheFlushBit = (1<<15);
     }
 
-    const char* uniqueId = create_unique_id(context);
-    size_t uniqueIdLength = strlen(uniqueId);
+    const char* instanceName = context->instanceName;
+    size_t instanceNameLength = strlen(context->instanceName);
 
     uint32_t ttl = 120;
 
     uint16_t records = 0;
     records += 1; // PTR _nabto._udp.local.
-    records += 1; // PTR p-abcdexyz-d-xyzabcde._sub._nabto._udp.local.
     records += 1; // PTR _services._dns-sd._udp.local.
     records += 1; // TXT p-abcdexyz-d-xyzabcde._nabto._udp.local.
     records += 1; // SRV p-abcdexyz-d-xyzabcde._nabto._udp.local.
     records += ipsSize; // A, AAAA p-abcdexyz-d-xyzabcde.local
-    records += context->subtypesSize; // additional subtypes
+    records += nn_string_set_size(context->subtypes); // additional subtypes
 
     // insert header
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, id);
@@ -250,27 +225,25 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, NABTO_MDNS_PTR);
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 1); // IN class
     ptr = nabto_mdns_server_uint32_write_forward(ptr, end, ttl); // TTL
-    ptr = nabto_mdns_server_uint16_write_forward(ptr, end, (uint16_t)(uniqueIdLength+3)); // size of (service name length (1byte) + service name + compression label(2bytes))
+    ptr = nabto_mdns_server_uint16_write_forward(ptr, end, (uint16_t)(instanceNameLength+3)); // size of (service name length (1byte) + service name + compression label(2bytes))
     serviceLabel = 0xC000 + (uint16_t)(ptr - buffer);
-    ptr = nabto_mdns_server_encode_string(ptr, end, uniqueId);
+    ptr = nabto_mdns_server_encode_string(ptr, end, instanceName);
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 0xC00C); // Compression label (0xC000 + header size)
 
-    // insert ptr for instance subtype
-    ptr = nabto_mdns_server_encode_string(ptr, end, uniqueId);
-    subLabel = 0xC000 + (uint16_t)(ptr - buffer);
-    ptr = nabto_mdns_server_encode_string(ptr, end, "_sub");
-    ptr = nabto_mdns_server_uint16_write_forward(ptr, end, nabtoLabel); // Compression label
-    ptr = nabto_mdns_server_uint16_write_forward(ptr, end, NABTO_MDNS_PTR);
-    ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 1); // IN class
-    ptr = nabto_mdns_server_uint32_write_forward(ptr, end, ttl); // TTL
-    ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 2); // size of compression label
-    ptr = nabto_mdns_server_uint16_write_forward(ptr, end, serviceLabel);
+    // insert ptrs for subtypes
 
-    // insert ptrs for custom subtypes
+    subLabel = 0;
+    const char* subtype;
+    NN_STRING_SET_FOREACH(subtype, context->subtypes) {
+        ptr = nabto_mdns_server_encode_string(ptr, end, subtype);
+        if (subLabel == 0) {
+            subLabel = 0xC000 + (uint16_t)(ptr - buffer);
+            ptr = nabto_mdns_server_encode_string(ptr, end, "_sub");
+            ptr = nabto_mdns_server_uint16_write_forward(ptr, end, nabtoLabel); // Compression label
+        } else {
+            ptr = nabto_mdns_server_uint16_write_forward(ptr, end, subLabel); // Compression label
+        }
 
-    for (size_t i = 0; i < context->subtypesSize; i++) {
-        ptr = nabto_mdns_server_encode_string(ptr, end, context->subtypes[i]);
-        ptr = nabto_mdns_server_uint16_write_forward(ptr, end, subLabel); // Compression label
         ptr = nabto_mdns_server_uint16_write_forward(ptr, end, NABTO_MDNS_PTR);
         ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 1); // IN class
         ptr = nabto_mdns_server_uint32_write_forward(ptr, end, ttl); // TTL
@@ -293,12 +266,12 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, NABTO_MDNS_SRV);
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 1 + cacheFlushBit); // IN class + cache flush
     ptr = nabto_mdns_server_uint32_write_forward(ptr, end, ttl); // TTL
-    ptr = nabto_mdns_server_uint16_write_forward(ptr, end, (uint16_t)(6+1+uniqueIdLength+2)); // size of (prio(2bytes) + weight(2bytes) + port(2bytes) + hostname(length(1bytes + string)) + compression label(2bytes))
+    ptr = nabto_mdns_server_uint16_write_forward(ptr, end, (uint16_t)(6+1+instanceNameLength+2)); // size of (prio(2bytes) + weight(2bytes) + port(2bytes) + hostname(length(1bytes + string)) + compression label(2bytes))
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 0); // prio
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 0); // weight
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, port); // port
     domainLabel = 0xC000 + (uint16_t)(ptr - buffer);
-    ptr = nabto_mdns_server_encode_string(ptr, end, uniqueId);
+    ptr = nabto_mdns_server_encode_string(ptr, end, instanceName);
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, localLabel); // Compression label
 
     // insert txt record
@@ -306,37 +279,32 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, NABTO_MDNS_TXT);
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 1 + cacheFlushBit); // IN class + cache flush
     ptr = nabto_mdns_server_uint32_write_forward(ptr, end, ttl); // TTL
-    size_t txtDataLen =
-        1+strlen(deviceTxt)+strlen(context->deviceId) +
-        1+strlen(productTxt)+strlen(context->productId);
+    size_t txtDataLen = 0;
 
-    for (size_t i = 0; i < context->txtItemsSize; i++) {
+    struct nn_string_map_iterator it;
+    NN_STRING_MAP_FOREACH(it, context->txtItems) {
         // format length(1byte) name=value
+        const char* key = nn_string_map_key(&it);
+        const char* value = nn_string_map_value(&it);
         txtDataLen += 1; // length byte
-        txtDataLen += strlen(context->txtItems[i].key);
+        txtDataLen += strlen(key);
         txtDataLen += 1; // strlen("=")
-        txtDataLen += strlen(context->txtItems[i].value);
+        txtDataLen += strlen(value);
     }
 
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, (uint16_t)txtDataLen);
-    // manually inserting strings to concat
-    ptr = nabto_mdns_server_uint8_write_forward(ptr, end, (uint8_t)(strlen(deviceTxt)+strlen(context->deviceId)));
-    ptr = nabto_mdns_server_string_write_forward(ptr, end, deviceTxt);
-    ptr = nabto_mdns_server_string_write_forward(ptr, end, context->deviceId);
 
-    ptr = nabto_mdns_server_uint8_write_forward(ptr, end, (uint8_t)(strlen(productTxt)+strlen(context->productId)));
-    ptr = nabto_mdns_server_string_write_forward(ptr, end, productTxt);
-    ptr = nabto_mdns_server_string_write_forward(ptr, end, context->productId);
-
-    for (size_t i = 0; i < context->txtItemsSize; i++) {
-        size_t l = strlen(context->txtItems[i].key) + 1 + strlen(context->txtItems[i].value);
+    NN_STRING_MAP_FOREACH(it, context->txtItems) {
+        const char* key = nn_string_map_key(&it);
+        const char* value = nn_string_map_value(&it);
+        size_t l = strlen(key) + 1 + strlen(value);
         if (l > 255) {
             return false;
         }
         ptr = nabto_mdns_server_uint8_write_forward(ptr, end, (uint8_t)l);
-        ptr = nabto_mdns_server_string_write_forward(ptr, end, context->txtItems[i].key);
+        ptr = nabto_mdns_server_string_write_forward(ptr, end, key);
         ptr = nabto_mdns_server_string_write_forward(ptr, end, "=");
-        ptr = nabto_mdns_server_string_write_forward(ptr, end, context->txtItems[i].value);
+        ptr = nabto_mdns_server_string_write_forward(ptr, end, value);
 
     }
 

@@ -43,19 +43,10 @@ struct nabto_mdns_ip_address {
     };
 };
 
-struct nabto_mdns_server_txt_item {
-    const char* key;
-    const char* value;
-};
-
 struct nabto_mdns_server_context {
-    const char* deviceId;
-    const char* productId;
-    const char* friendlyName;
-    const char** subtypes;
-    size_t subtypesSize;
-    struct nabto_mdns_server_txt_item* txtItems;
-    size_t txtItemsSize;
+    const char* instanceName;
+    struct nn_string_set* subtypes;
+    struct nn_string_map* txtItems;
 };
 
 // Mdns server
@@ -93,22 +84,16 @@ struct nabto_mdns_server_context {
 /**
  * initialize the mdns server.
  * @param context     The context for the server
- * @param deviceId    Pointer to null terminated device ID string, must be kept alive while server is in use
- * @param productId   Pointer to null terminated product ID string, must be kept alive while server is in use
- * @param serviceName Pointer to null terminated service name string, must be kept alive while server is in use
- * @param hostname    Pointer to null terminated hostname string, must be kept alive while server is in use
-  */
-void nabto_mdns_server_init(struct nabto_mdns_server_context* context,
-                            const char* deviceId, const char* productId);
+ */
+void nabto_mdns_server_init(struct nabto_mdns_server_context* context);
 
 /**
  * Add a service to the mdns server
  */
 void nabto_mdns_server_update_info(struct nabto_mdns_server_context* context,
-                                   const char* subtypes[],
-                                   size_t subtypesSize,
-                                   struct nabto_mdns_server_txt_item txtItems[],
-                                   size_t txtItemsSize);
+                                   const char* instanceName,
+                                   struct nn_string_set* subtypes,
+                                   struct nn_string_map* txtItems);
 
 /**
  * Hande incoming packet from multicast socket
@@ -122,8 +107,6 @@ bool nabto_mdns_server_handle_packet(struct nabto_mdns_server_context* context,
 
 /**
  * Build response packet to be sent om multicast socket
- *
- *
  *
  * @param context     The context for the server
  * @param id          Id from the request packet
