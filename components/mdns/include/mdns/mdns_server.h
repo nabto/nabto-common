@@ -89,6 +89,11 @@ void nabto_mdns_server_init(struct nabto_mdns_server_context* context);
 
 /**
  * Add a service to the mdns server
+ *
+ * @param context  The server context
+ * @param instanceName  The instance name pointer needs to be kept alive as long as the server is used.
+ * @param subtypes  The subtypes pointer needs to be kept alive as long as the server is used.
+ * @param txtItems  The txt items needs to be kept alive as long as the server is alive.
  */
 void nabto_mdns_server_update_info(struct nabto_mdns_server_context* context,
                                    const char* instanceName,
