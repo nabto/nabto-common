@@ -4,6 +4,7 @@
 #include <nn/string_set.h>
 
 #include <stdbool.h>
+#include <ctype.h>
 
 static const uint8_t* nabto_mdns_server_uint8_read_forward(const uint8_t* buf, const uint8_t* end, uint8_t* val);
 static const uint8_t* nabto_mdns_server_uint16_read_forward(const uint8_t* buf, const uint8_t* end, uint16_t* val);
@@ -40,7 +41,12 @@ static bool match_label(const uint8_t* bufferLabel, size_t bufferLabelSize, cons
         return false;
     }
 
-    return (strncasecmp((const char*)bufferLabel, label, labelSize) == 0);
+    for (size_t i = 0; i < labelSize; i++) {
+        if (tolower(label[i]) != tolower(bufferLabel[i])) {
+            return false;
+        }
+    }
+    return true;
 }
 
 static const bool match_name(const uint8_t* buffer, const uint8_t* end, const uint8_t* ptr, const char** toMatch)
