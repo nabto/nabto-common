@@ -57,10 +57,16 @@ static const bool match_name(const uint8_t* buffer, const uint8_t* end, const ui
     }
     uint8_t length;
     ptr = nabto_mdns_server_uint8_read_forward(ptr, end, &length);
+    if (!ptr) {
+        return false;
+    }
     if ((length & 0b11000000) == 0b11000000) {
         // this is a compression label
         uint8_t length2;
         ptr = nabto_mdns_server_uint8_read_forward(ptr, end, &length2);
+        if (!ptr) {
+            return false;
+        }
         uint16_t offset = length2;
         offset += ((uint16_t)(length & ~0b11000000)) << 8;
 
@@ -91,6 +97,9 @@ static const uint8_t* skip_name(const uint8_t* ptr, const uint8_t* end)
     while (ptr != NULL) {
         uint8_t length;
         ptr = nabto_mdns_server_uint8_read_forward(ptr, end, &length);
+        if (!ptr) {
+            return ptr;
+        }
         if ((length & 0b11000000) == 0b11000000) {
             // compression label, we have reached the end.
             // skip the next byte and return ptr as we have reached the end
