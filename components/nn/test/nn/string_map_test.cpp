@@ -23,4 +23,20 @@ BOOST_AUTO_TEST_CASE(basic)
     nn_string_map_deinit(&map);
 }
 
+BOOST_AUTO_TEST_CASE(erase)
+{
+    struct nn_string_map map;
+    nn_string_map_init(&map);
+
+    struct nn_string_map_iterator it1 = nn_string_map_insert(&map, "key", "value");
+    struct nn_string_map_iterator it2 = nn_string_map_insert(&map, "key2", "value2");
+
+    nn_string_map_erase(&map, "key");
+    nn_string_map_erase_iterator(&map, &it2);
+
+    BOOST_TEST(nn_string_map_size(&map) == (size_t)0);
+
+    nn_string_map_deinit(&map);
+}
+
 BOOST_AUTO_TEST_SUITE_END()

@@ -57,6 +57,21 @@ struct nn_string_map_iterator nn_string_map_insert(struct nn_string_map* map, co
     }
 }
 
+void nn_string_map_erase(struct nn_string_map* map, const char* key)
+{
+    struct nn_string_map_iterator it = nn_string_map_get(map, key);
+    if (!nn_string_map_is_end(&it)) {
+        nn_string_map_erase_iterator(map, &it);
+    }
+}
+
+void nn_string_map_erase_iterator(struct nn_string_map* map, struct nn_string_map_iterator* it)
+{
+    void* tmp = nn_llist_get_item(&it->it);
+    struct nn_string_map_item* item = tmp;
+    nn_string_map_destroy_item(item);
+}
+
 struct nn_string_map_iterator nn_string_map_get(const struct nn_string_map* map, const char* key)
 {
     struct nn_llist_iterator it;

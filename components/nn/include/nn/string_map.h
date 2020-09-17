@@ -57,6 +57,13 @@ struct nn_string_map_iterator nn_string_map_insert(struct nn_string_map* map, co
 void nn_string_map_erase(struct nn_string_map* map, const char* key);
 
 /**
+ * erase a key from the map based on its iterator.
+ */
+void nn_string_map_erase_iterator(struct nn_string_map* map, struct nn_string_map_iterator* it);
+
+
+
+/**
  * return true iff the map is empty
  */
 bool nn_string_map_empty(const struct nn_string_map* map);
