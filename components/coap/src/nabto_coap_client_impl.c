@@ -583,13 +583,22 @@ void nabto_coap_client_request_send(struct nabto_coap_client_request* request)
  */
 void nabto_coap_client_request_cancel(struct nabto_coap_client_request* request)
 {
-    if (request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_ACK ||
-        request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE)
+    struct nabto_coap_client* client = request->client;
+    if (request->state == NABTO_COAP_CLIENT_REQUEST_STATE_SEND_REQUEST)
+    {
+        request->state = NABTO_COAP_CLIENT_REQUEST_STATE_DONE_CALLBACK;
+        request->status = NABTO_COAP_CLIENT_STATUS_STOPPED;
+        client->notifyEvent(client->userData);
+    } else if (request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_ACK ||
+               request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE)
     {
         struct nabto_coap_client* client = request->client;
         client->needSendRst = true;
         client->messageIdRst = request->messageId;
         client->connectionRst = request->connection;
+        request->state = NABTO_COAP_CLIENT_REQUEST_STATE_DONE_CALLBACK;
+        request->status = NABTO_COAP_CLIENT_STATUS_STOPPED;
+        client->notifyEvent(client->userData);
     }
 }
 
