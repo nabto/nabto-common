@@ -89,7 +89,6 @@ const char* nabto_stream_next_event_type_to_string(enum nabto_stream_next_event_
         case ET_RST: return "ET_RST";
         case ET_NOTHING: return "ET_NOTHING";
         case ET_CLOSED: return "CLOSED";
-        case ET_RELEASED: return "RELEASED";
     }
     return "Not here";
 }

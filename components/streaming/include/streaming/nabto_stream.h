@@ -129,12 +129,14 @@ nabto_stream_status nabto_stream_write_buffer(struct nabto_stream* stream, const
  */
 nabto_stream_status nabto_stream_close(struct nabto_stream* stream);
 
-
 /**
- * Release a stream. If the stream is already closed nothing happens. If
- * the stream is not closed it is aborted.
+ * Ask the stream if it is being stopped now, should it then manager
+ * then send a rst packet on behalf of the stream. I.e. inform the
+ * other end that the stream has been aborted.
+ *
+ * @return true iff a rst should be sent on behalf of the stream.
  */
-nabto_stream_status nabto_stream_release(struct nabto_stream* stream);
+bool nabto_stream_stop_should_send_rst(struct nabto_stream* stream);
 
 /**
  * Set event callback for the stream.  This is used to implement an

@@ -99,9 +99,7 @@ enum nabto_stream_next_event_type {
     ET_TIME_WAIT, // handle ET_TIME_WAIT state
     ET_WAIT, // wait for a timeout to happen.
     ET_NOTHING, // no next event, need user action or network input.
-    ET_CLOSED, // no more actions the stream is closed.
-    ET_RELEASED  // the user of the stream has released the stream,
-                 // there will be no more user actions.
+    ET_CLOSED // no more actions the stream is closed.
 };
 
 /** Stream Transfer Control Block states */
@@ -235,7 +233,6 @@ enum nabto_stream_module_event {
     NABTO_STREAM_MODULE_EVENT_CLOSE_CALLED,
     NABTO_STREAM_MODULE_EVENT_OPENED,
     NABTO_STREAM_MODULE_EVENT_ACCEPTED,
-    NABTO_STREAM_MODULE_EVENT_RELEASED
 };
 
 
@@ -307,12 +304,6 @@ struct nabto_stream {
                                                               First used for retransmission of SYN,
                                                               Then retransmission of FIN, and lastly used for
                                                               waiting in ST_TIME_WAIT. */
-    /**
-     * This is set to true after the user of the stream has called
-     * nabto_stream_release()
-     */
-    bool isReleased;
-
     /**
      * The sequence number to use for the syn packet aka the start
      * sequence number. This is primarily used in situations where we

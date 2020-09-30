@@ -325,11 +325,7 @@ enum nabto_stream_next_event_type nabto_stream_next_event_to_handle(struct nabto
 
 
     if (stream->state >= ST_CLOSED) {
-        if (stream->isReleased) {
-            return ET_RELEASED;
-        } else {
-            return ET_CLOSED;
-        }
+        return ET_CLOSED;
     }
 
     return ET_WAIT;

@@ -261,16 +261,12 @@ nabto_stream_status nabto_stream_close(struct nabto_stream* stream)
     return NABTO_STREAM_STATUS_OK;
 }
 
-nabto_stream_status nabto_stream_release(struct nabto_stream* stream)
+bool nabto_stream_stop_should_send_rst(struct nabto_stream* stream)
 {
-    stream->isReleased = true;
-    if (stream->state >= ST_CLOSED) {
-        return NABTO_STREAM_STATUS_OK;
-    } else {
-        SET_STATE(stream, ST_ABORTED);
-        nabto_stream_module_notify_event(stream, NABTO_STREAM_MODULE_EVENT_RELEASED);
-        return NABTO_STREAM_STATUS_OK;
+    if (stream->state == ST_CLOSED || stream->state == ST_IDLE || stream->state == ST_ABORTED_RST) {
+        return false;
     }
+    return true;
 }
 
 nabto_stream_status nabto_stream_set_application_event_callback(struct nabto_stream* stream, nabto_stream_application_event_callback cb, void* userData)
