@@ -105,6 +105,7 @@ void nabto_mdns_server_update_info(struct nabto_mdns_server_context* context,
  * @param context     The context for the server
  * @param buffer      Buffer containing the incoming packet
  * @param bufferSize  Size of incoming buffer
+ * @param id          Place to put ID to reference in build packet function
  * @return true if a response packet should be build and send, false if not
  */
 bool nabto_mdns_server_handle_packet(struct nabto_mdns_server_context* context,
@@ -116,6 +117,7 @@ bool nabto_mdns_server_handle_packet(struct nabto_mdns_server_context* context,
  * @param context     The context for the server
  * @param id          Id from the request packet
  * @param unicastResponse make the response as a unicast response.
+ * @param goodbye     Make the response a goodbye packet.
  * @param ips         List of IP addresses to advertise
  * @param ipsSize     Number of elements in the list of IPs
  * @param port        Port number to advertise
@@ -125,7 +127,7 @@ bool nabto_mdns_server_handle_packet(struct nabto_mdns_server_context* context,
  * @return true if the response packet should be and sent, false if not
  */
 bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
-                                    uint16_t id, bool unicastResponse,
+                                    uint16_t id, bool unicastResponse, bool goodbye,
                                     const struct nabto_mdns_ip_address* ips, const size_t ipsSize, uint16_t port,
                                     uint8_t* buffer, size_t bufferSize, size_t* written);
 

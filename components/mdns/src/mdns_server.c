@@ -187,7 +187,7 @@ bool nabto_mdns_server_handle_packet(struct nabto_mdns_server_context* context,
 }
 
 bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
-                                    uint16_t id, bool unicastResponse,
+                                    uint16_t id, bool unicastResponse, bool goodbye,
                                     const struct nabto_mdns_ip_address* ips, const size_t ipsSize, uint16_t port,
                                     uint8_t* buffer, size_t bufferSize, size_t* written)
 
@@ -213,6 +213,10 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     size_t instanceNameLength = strlen(context->instanceName);
 
     uint32_t ttl = 120;
+
+    if (goodbye) {
+        ttl = 0;
+    }
 
     uint16_t records = 0;
     records += 1; // PTR _nabto._udp.local.
