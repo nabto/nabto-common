@@ -12,6 +12,7 @@ nabto_coap_error nabto_coap_server_init(struct nabto_coap_server* server, nabto_
     server->notifyEvent = notifyEvent;
     server->userData = userData;
     server->ackTimeout = NABTO_COAP_ACK_TIMEOUT;
+    server->maxRequests = SIZE_MAX;
 
     // init requests list
     server->requestsSentinel = calloc(1, sizeof(struct nabto_coap_server_request));
@@ -43,6 +44,12 @@ void nabto_coap_server_destroy(struct nabto_coap_server* server)
     nabto_coap_router_node_free(server->root);
     server->requestsSentinel = NULL;
 }
+
+void nabto_coap_server_limit_requests(struct nabto_coap_server* server, size_t limit)
+{
+    server->maxRequests = limit;
+}
+
 
 void nabto_coap_server_request_free(struct nabto_coap_server_request* request)
 {
@@ -346,6 +353,7 @@ uint8_t* nabto_coap_server_handle_send(struct nabto_coap_server* server, uint8_t
 
 void nabto_coap_server_free_request(struct nabto_coap_server_request* request)
 {
+    struct nabto_coap_server* server = request->server;
     if (!request->isFreed || request->state != NABTO_COAP_SERVER_REQUEST_STATE_DONE) {
         // dont free before user frees and server is done
         return;
@@ -370,6 +378,8 @@ void nabto_coap_server_free_request(struct nabto_coap_server_request* request)
 
 
     free(request);
+
+    server->activeRequests--;
 }
 
 uint32_t nabto_coap_server_stamp_now(struct nabto_coap_server* server)

@@ -50,12 +50,16 @@ struct nabto_coap_server {
     uint16_t ackMessageId;
     void* ackConnection;
 
+    size_t maxRequests; // max concurrent requests
+    size_t activeRequests;
+
 };
 
 nabto_coap_error nabto_coap_server_init(struct nabto_coap_server* server, nabto_coap_get_stamp getStamp, nabto_coap_notify_event notifyEvent, void* userData);
 
 void nabto_coap_server_destroy(struct nabto_coap_server* server);
 
+void nabto_coap_server_limit_requests(struct nabto_coap_server* server, size_t limit);
 
 #define NABTO_COAP_SERVER_LOG_TRACE(fmt, args) do { printf(fmt, args); } while(0);
 

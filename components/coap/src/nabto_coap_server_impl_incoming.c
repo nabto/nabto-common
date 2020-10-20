@@ -243,11 +243,16 @@ struct nabto_coap_server_request* nabto_coap_server_handle_new_request(struct na
         }
     }
 
+    if(server->activeRequests >= server->maxRequests) {
+        nabto_coap_server_make_error_response(server, connection, message, NABTO_COAP_CODE_SERVICE_UNAVAILABLE, outOfResources);
+        return NULL;
+    }
     struct nabto_coap_server_request* request = nabto_coap_server_request_new(server);
     if (!request) {
         nabto_coap_server_make_error_response(server, connection, message, NABTO_COAP_CODE_SERVICE_UNAVAILABLE, outOfResources);
         return NULL;
     }
+    server->activeRequests++;
 
     struct nabto_coap_server_resource* resource = nabto_coap_server_find_resource(server, message, &request->parameterSentinel);
     if (resource == NULL) {
