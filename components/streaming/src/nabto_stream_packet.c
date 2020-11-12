@@ -719,7 +719,7 @@ void nabto_stream_dump_packet(struct nabto_stream* stream, const uint8_t* buffer
                 NABTO_STREAM_LOG_TRACE(stream, "    Sack ackGap: %" NABTO_STREAM_PRIu32 ", nackGap: %" NABTO_STREAM_PRIu32, ackGap, nackGap);
             }
         } else if (extensionType == NABTO_STREAM_EXTENSION_DATA) {
-            uint32_t seq;
+            uint32_t seq = 0;
             extPtr = nabto_stream_read_uint32(extPtr, extEnd, &seq);
             NABTO_STREAM_LOG_TRACE(stream, "  Data extension. Sequence number: %" NABTO_STREAM_PRIu32 ", data length: %" NABTO_STREAM_PRIu16, seq, length - 4);
         } else if (extensionType == NABTO_STREAM_EXTENSION_FIN) {
@@ -739,7 +739,7 @@ void nabto_stream_dump_packet(struct nabto_stream* stream, const uint8_t* buffer
         } else if (extensionType == NABTO_STREAM_EXTENSION_EXTRA_DATA) {
             NABTO_STREAM_LOG_TRACE(stream, "  Extra Data extension dataLength: %" NABTO_STREAM_PRIu16, length);
         } else if (extensionType == NABTO_STREAM_EXTENSION_SYN) {
-            uint32_t synSeq;
+            uint32_t synSeq = 0;
             extPtr = nabto_stream_read_uint32(extPtr, extEnd, &synSeq);
             NABTO_STREAM_LOG_TRACE(stream, "  Syn sequence number: %" NABTO_STREAM_PRIu32, synSeq);
         } else {
