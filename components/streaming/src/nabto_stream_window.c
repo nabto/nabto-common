@@ -249,7 +249,8 @@ enum nabto_stream_next_event_type nabto_stream_next_event_to_handle(struct nabto
     if (stream->state == ST_ESTABLISHED ||
         stream->state == ST_FIN_WAIT_1 ||
         stream->state == ST_CLOSE_WAIT ||
-        stream->state == ST_LAST_ACK)
+        stream->state == ST_LAST_ACK ||
+        stream->state == ST_CLOSING)
     {
         if (stream->resendList->nextResend != stream->resendList) {
             if (nabto_stream_congestion_control_can_send(stream) &&
