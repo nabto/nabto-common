@@ -254,17 +254,31 @@ void nabto_stream_parse_ack_extension(struct nabto_stream* stream, const uint8_t
         }
     }
 
+    // maxAcked is the maximum acked segment. Gaps between maxAcked and the
+    // max cumulative sequence number is acked and nacked below. Set ackIterator
+    // to first unacked segment which sequence number is less or equal than maxAcked.
     struct nabto_stream_send_segment* ackIterator = stream->unacked->nextUnacked;
-    // it is cheaper than to set the iterator to the last element in the unacked list
+
+    // list It is cheaper to scan for the segment just above the maxAcked than
+    // to iterate back from the top of the list of unacked segments.
     while (ackIterator != stream->unacked &&
-           nabto_stream_sequence_less(ackIterator->seq, maxAcked))
+           nabto_stream_sequence_less_equal(ackIterator->seq, maxAcked))
     {
         ackIterator = ackIterator->nextUnacked;
     }
 
-    if (ackIterator == stream->unacked) {
-        ackIterator = stream->unacked->prevUnacked;
-    }
+    // now ACK iterator points just above the highest unacked segment below maxAcked.
+    ackIterator = ackIterator->prevUnacked;
+
+    // The gaps structure defines segments which has been acked and segments
+    // which nas not been acked. No gaps will be present if all the data has
+    // been acked upto maxAcked.
+    //
+    // If the packet did not have room for all the gaps, then the first nack gap
+    // will contains segments already acked. This means an ACK is definitively
+    // an ack but an NACK can be on data already acked. An NACK on already acked
+    // data does not mean that this data has to be retransmitted.
+
 
     // to be adjusted below.
     uint32_t maxCumulativeAcked = maxAcked;
@@ -281,39 +295,38 @@ void nabto_stream_parse_ack_extension(struct nabto_stream* stream, const uint8_t
             uint32_t ackTop = maxCumulativeAcked;
             uint32_t nackTop = ackTop - ackGap;
             uint32_t nackBottom = nackTop - nackGap;
-            ackIterator = nabto_stream_ack_block(stream, ackIterator, ackTop, nackTop, tsEcr);
-            ackIterator = nabto_stream_nack_block(stream, ackIterator, nackTop, nackBottom, tsEcr);
+            // Mark all segments between ackTop down to nackTop as acked. The sequence number ackTop is not included.
+            ackIterator = nabto_stream_ack_block(stream, ackIterator, nackTop, tsEcr);
+            // Mark all segments from nackTop down to nackBottom as not acked. The sequence number nackTop is not included.
+            ackIterator = nabto_stream_nack_block(stream, ackIterator, nackBottom, tsEcr);
 
             maxCumulativeAcked = nackBottom;
         }
     }
 
-    if (stream->unacked != stream->unacked->nextUnacked) {
-        uint32_t bottom = stream->unacked->nextUnacked->seq - 1;
-        nabto_stream_ack_block(stream, ackIterator, maxCumulativeAcked, bottom, tsEcr);
+    // everything from current ackIterator downto stream->unacked is acked since
+    // everything not unacked has been given in the nack blocks.
+
+    while(ackIterator != stream->unacked) {
+        ackIterator = nabto_stream_handle_ack_iterator(stream, ackIterator, tsEcr);
     }
 }
 
-struct nabto_stream_send_segment* nabto_stream_ack_block(struct nabto_stream* stream, struct nabto_stream_send_segment* ackIterator, uint32_t top, uint32_t bottom, uint32_t tsEcr)
+struct nabto_stream_send_segment* nabto_stream_ack_block(struct nabto_stream* stream, struct nabto_stream_send_segment* ackIterator, uint32_t bottom, uint32_t tsEcr)
 {
-    uint32_t i;
-    for (i = top; nabto_stream_sequence_less(bottom, i); i--) {
-        ackIterator = nabto_stream_handle_ack_iterator(stream, i, ackIterator, tsEcr);
-        if (ackIterator == stream->unacked) {
-            break;
-        }
+    // iterate as long as there are more unacked segments an as long as the
+    // bottom sequence number is > the current unacked segments sequence
+    // number.
+    while(ackIterator != stream->unacked && nabto_stream_sequence_less(bottom, ackIterator->seq)) {
+        ackIterator = nabto_stream_handle_ack_iterator(stream, ackIterator, tsEcr);
     }
     return ackIterator;
 }
 
-struct nabto_stream_send_segment* nabto_stream_nack_block(struct nabto_stream* stream, struct nabto_stream_send_segment* ackIterator, uint32_t top, uint32_t bottom, uint32_t tsEcr)
+struct nabto_stream_send_segment* nabto_stream_nack_block(struct nabto_stream* stream, struct nabto_stream_send_segment* ackIterator, uint32_t bottom, uint32_t tsEcr)
 {
-    uint32_t i;
-    for (i = top; i >= bottom; i--) {
-        ackIterator = nabto_stream_handle_nack_iterator(stream, i, ackIterator, tsEcr);
-        if (ackIterator == stream->unacked) {
-            break;
-        }
+    while(ackIterator != stream->unacked && nabto_stream_sequence_less(bottom, ackIterator->seq)) {
+        ackIterator = nabto_stream_handle_nack_iterator(stream, ackIterator, tsEcr);
     }
     return ackIterator;
 }

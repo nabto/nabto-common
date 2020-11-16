@@ -496,9 +496,9 @@ void nabto_stream_move_segments_from_recv_window_to_recv_read(struct nabto_strea
 
 uint32_t nabto_stream_get_recv_window_size(struct nabto_stream* stream);
 
-struct nabto_stream_send_segment* nabto_stream_handle_ack_iterator(struct nabto_stream* stream, uint32_t seq, struct nabto_stream_send_segment* iterator, uint32_t timestampEcho);
+struct nabto_stream_send_segment* nabto_stream_handle_ack_iterator(struct nabto_stream* stream, struct nabto_stream_send_segment* iterator, uint32_t timestampEcho);
 
-struct nabto_stream_send_segment* nabto_stream_handle_nack_iterator(struct nabto_stream* stream, uint32_t seq, struct nabto_stream_send_segment* iterator, uint32_t timestampEcho);
+struct nabto_stream_send_segment* nabto_stream_handle_nack_iterator(struct nabto_stream* stream, struct nabto_stream_send_segment* iterator, uint32_t timestampEcho);
 
 struct nabto_stream_recv_segment* nabto_stream_recv_max_segment(struct nabto_stream* stream);
 

@@ -468,81 +468,56 @@ void nabto_stream_add_fin_segment_to_send_lists(struct nabto_stream* stream)
  *
  * When the function return stream->unacked there's no more unacked segments to ack.
  */
-struct nabto_stream_send_segment* nabto_stream_handle_ack_iterator(struct nabto_stream* stream, uint32_t seq, struct nabto_stream_send_segment* iterator, uint32_t timestampEcho)
+struct nabto_stream_send_segment* nabto_stream_handle_ack_iterator(struct nabto_stream* stream, struct nabto_stream_send_segment* iterator, uint32_t timestampEcho)
 {
-    while (nabto_stream_sequence_less(seq, iterator->seq) &&
-           iterator != stream->unacked)
-    {
-        iterator = iterator->prevUnacked;
-    }
-
-    if (iterator == stream->unacked) {
-        return stream->unacked;
-    }
-
     if (iterator == &stream->finSegment) {
         nabto_stream_handle_ack_on_fin(stream);
     }
 
-    if (iterator->seq == seq) {
-        if (iterator == &stream->finSegment) {
-            NABTO_STREAM_LOG_TRACE(stream, "acking fin segment %" NABTO_STREAM_PRIu32, seq);
-        } else {
-            NABTO_STREAM_LOG_TRACE(stream, "acking data segment %" NABTO_STREAM_PRIu32, seq);
-        }
-        //ack segment
-        nabto_stream_update_congestion_control_receive_stats(stream, iterator, timestampEcho);
-        nabto_stream_congestion_control_handle_ack(stream, iterator);
+    if (iterator == &stream->finSegment) {
+        NABTO_STREAM_LOG_TRACE(stream, "acking fin segment %" NABTO_STREAM_PRIu32, iterator->seq);
+    } else {
+        NABTO_STREAM_LOG_TRACE(stream, "acking data segment %" NABTO_STREAM_PRIu32, iterator->seq);
+    }
+    //ack segment
+    nabto_stream_update_congestion_control_receive_stats(stream, iterator, timestampEcho);
+    nabto_stream_congestion_control_handle_ack(stream, iterator);
 
-        stream->applicationEvents.dataWrite = true;
+    stream->applicationEvents.dataWrite = true;
 
-        struct nabto_stream_send_segment* segment = iterator;
-        iterator = iterator->prevUnacked;
-        nabto_stream_segment_has_been_acked(stream, segment);
-
+    struct nabto_stream_send_segment* segment = iterator;
+    iterator = iterator->prevUnacked;
+    nabto_stream_segment_has_been_acked(stream, segment);
 
 
-        if (stream->unacked == stream->unacked->nextUnacked &&
-            stream->sendList == stream->sendList->nextSend)
+
+    if (stream->unacked == stream->unacked->nextUnacked &&
+        stream->sendList == stream->sendList->nextSend)
+    {
+        if ((stream->state == ST_FIN_WAIT_1 || stream->state == ST_LAST_ACK) &&
+            stream->finSegment.state == B_IDLE)
         {
-            if ((stream->state == ST_FIN_WAIT_1 || stream->state == ST_LAST_ACK) &&
-                stream->finSegment.state == B_IDLE)
-            {
-                nabto_stream_add_fin_segment_to_send_lists(stream);
-            } else {
-                // no more unacked data nor fin segments outstanding stop processing for now.
-                stream->timeoutStamp = nabto_stream_stamp_infinite();
-            }
+            nabto_stream_add_fin_segment_to_send_lists(stream);
+        } else {
+            // no more unacked data nor fin segments outstanding stop processing for now.
+            stream->timeoutStamp = nabto_stream_stamp_infinite();
         }
     }
-
     return iterator;
 }
 
-struct nabto_stream_send_segment* nabto_stream_handle_nack_iterator(struct nabto_stream* stream, uint32_t seq, struct nabto_stream_send_segment* iterator, uint32_t timestampEcho)
+struct nabto_stream_send_segment* nabto_stream_handle_nack_iterator(struct nabto_stream* stream, struct nabto_stream_send_segment* iterator, uint32_t timestampEcho)
 {
-    while (nabto_stream_sequence_less(seq, iterator->seq) &&
-           iterator != stream->unacked)
-    {
-        iterator = iterator->prevUnacked;
-    }
-    if (iterator == stream->unacked) {
-        return stream->unacked;
-    }
-
-    if (iterator->seq == seq) {
-        if (iterator->logicalSentStamp < timestampEcho) {
-            iterator->ackedAfter++;
-            if (iterator->ackedAfter == 2) {
-                nabto_stream_congestion_control_adjust_ssthresh_after_triple_ack(stream, iterator);
-                stream->reorderedOrLostPackets++;
-                nabto_stream_mark_segment_for_retransmission(stream, iterator);
-            }
+    if (iterator->logicalSentStamp < timestampEcho) {
+        iterator->ackedAfter++;
+        if (iterator->ackedAfter == 2) {
+            nabto_stream_congestion_control_adjust_ssthresh_after_triple_ack(stream, iterator);
+            stream->reorderedOrLostPackets++;
+            nabto_stream_mark_segment_for_retransmission(stream, iterator);
         }
-
-        iterator = iterator->prevUnacked;
     }
 
+    iterator = iterator->prevUnacked;
     return iterator;
 }
 
