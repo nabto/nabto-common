@@ -132,7 +132,7 @@ bool nabto_stun_decode_message(struct nabto_stun_message* msg, const uint8_t* bu
     length = nabto_stun_uint16_read(ptr);
     ptr += 2;
     if (type != STUN_MESSAGE_BINDING_RESPONSE_SUCCESS) {
-        printf("not binding response\n");
+        //printf("not binding response\n");
         return false;
     }
     ptr += 16;
@@ -152,21 +152,21 @@ bool nabto_stun_decode_message(struct nabto_stun_message* msg, const uint8_t* bu
                 }
                 msg->mappedEp.addr.type = NABTO_STUN_IPV4;
             } else if (family == STUN_ADDRESS_FAMILY_V6) {
-                printf("family V6\n");
+                //printf("family V6\n");
                 //todo: PARSE IPv6 AND REMOVE RETURN
                 return false;
             } else {
-                printf("family OTHER\n");
+                //printf("family OTHER\n");
                 return false;
             }
         } else if (attType == STUN_ATTRIBUTE_RESPONSE_ORIGIN) {
             if(!nabto_stun_parse_address(ptr+n+4, &msg->serverEp)) {
-                printf("parse response origin\n");
+                //printf("parse response origin\n");
                 return false;
             }
         } else if (attType == STUN_ATTRIBUTE_OTHER_ADDRESS) {
             if(!nabto_stun_parse_address(ptr+n+4, &msg->altServerEp)) {
-                printf("parse other address\n");
+                //printf("parse other address\n");
                 return false;
             }
         }
