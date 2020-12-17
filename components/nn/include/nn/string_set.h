@@ -41,6 +41,11 @@ bool nn_string_set_contains(const struct nn_string_set* set, const char* item);
 void nn_string_set_erase(struct nn_string_set* set, const char* item);
 
 /**
+ * Erase all items in the set
+ */
+void nn_string_set_clear(struct nn_string_set* set);
+
+/**
  * @return true iff the set is empty
  */
 bool nn_string_set_empty(struct nn_string_set* set);

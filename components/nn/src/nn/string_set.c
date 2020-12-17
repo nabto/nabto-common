@@ -62,6 +62,16 @@ void nn_string_set_erase(struct nn_string_set* set, const char* item)
     }
 }
 
+void nn_string_set_clear(struct nn_string_set* set)
+{
+    char* str;
+    NN_VECTOR_FOREACH(&str, &set->strings)
+    {
+        free(str);
+    }
+    nn_vector_clear(&set->strings);
+}
+
 bool nn_string_set_empty(struct nn_string_set* set)
 {
     return nn_vector_empty(&set->strings);
