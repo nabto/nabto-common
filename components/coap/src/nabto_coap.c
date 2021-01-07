@@ -6,7 +6,7 @@ nabto_coap_code nabto_coap_uint16_to_code(uint16_t code)
 {
     int class = code/100;
     code = code - ( class*100 );
-    return NABTO_COAP_CODE(class, code);
+    return (nabto_coap_code)(NABTO_COAP_CODE(class, code));
 }
 
 
@@ -112,10 +112,10 @@ bool nabto_coap_parse_message(const uint8_t* packet, size_t packetSize, struct n
     uint8_t first = packet[0];
 
     uint8_t version = first >> 6;
-    msg->type = (first & 0x30)  >> 4;
+    msg->type = (nabto_coap_type)((first & 0x30)  >> 4);
     uint8_t tokenLength = (first & 0x0f);
 
-    msg->code = packet[1];
+    msg->code = (nabto_coap_code)(packet[1]);
     msg->messageId = ((uint16_t)packet[2] << 8) + ((uint16_t)packet[3]);
 
     ptr = packet + 4;

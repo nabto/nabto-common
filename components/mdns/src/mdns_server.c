@@ -49,7 +49,7 @@ static bool match_label(const uint8_t* bufferLabel, size_t bufferLabelSize, cons
     return true;
 }
 
-static const bool match_name(const uint8_t* buffer, const uint8_t* end, const uint8_t* ptr, const char** toMatch)
+static bool match_name(const uint8_t* buffer, const uint8_t* end, const uint8_t* ptr, const char** toMatch)
 {
     const char* label = *toMatch;
     if (label == NULL) {
@@ -60,7 +60,7 @@ static const bool match_name(const uint8_t* buffer, const uint8_t* end, const ui
     if (!ptr) {
         return false;
     }
-    if ((length & 0b11000000) == 0b11000000) {
+    if ((length & 0xC0) == 0xC0) {
         // this is a compression label
         uint8_t length2;
         ptr = nabto_mdns_server_uint8_read_forward(ptr, end, &length2);
@@ -68,7 +68,7 @@ static const bool match_name(const uint8_t* buffer, const uint8_t* end, const ui
             return false;
         }
         uint16_t offset = length2;
-        offset += ((uint16_t)(length & ~0b11000000)) << 8;
+        offset += ((uint16_t)(length & ~0xC0)) << 8;
 
         size_t currentOffset = ptr - buffer;
         if (offset >= currentOffset) {
@@ -100,7 +100,7 @@ static const uint8_t* skip_name(const uint8_t* ptr, const uint8_t* end)
         if (!ptr) {
             return ptr;
         }
-        if ((length & 0b11000000) == 0b11000000) {
+        if ((length & 0xC0) == 0xC0) {
             // compression label, we have reached the end.
             // skip the next byte and return ptr as we have reached the end
             ptr = nabto_mdns_server_uint8_read_forward(ptr, end, &length);

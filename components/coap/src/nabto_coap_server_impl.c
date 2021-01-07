@@ -217,7 +217,7 @@ uint8_t* nabto_coap_server_send_error(struct nabto_coap_server* server, uint8_t*
     struct nabto_coap_message_header header;
     memset(&header, 0, sizeof(struct nabto_coap_message_header));
     header.type = NABTO_COAP_TYPE_NON;
-    header.code = server->errorCode;
+    header.code = (nabto_coap_code)server->errorCode;
     header.messageId = server->errorMessageId;
     header.token = server->errorToken;
 
@@ -517,7 +517,7 @@ void nabto_coap_server_response_set_code_human(struct nabto_coap_server_request*
 {
     int code = humanCode % 100;
     int klass = humanCode / 100;
-    nabto_coap_server_response_set_code(request, NABTO_COAP_CODE(klass, code));
+    nabto_coap_server_response_set_code(request, (nabto_coap_code)(NABTO_COAP_CODE(klass, code)));
 }
 
 nabto_coap_error nabto_coap_server_response_set_payload(struct nabto_coap_server_request* request, const void* data, size_t dataSize)
