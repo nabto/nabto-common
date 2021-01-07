@@ -29,6 +29,33 @@ struct nn_log {
  */
 void nn_log_init(struct nn_log* logger, nn_log_print logPrint, void* userData);
 
+#ifdef HAS_NO_VARIADIC_MACROS
+
+void nn_log_error_adapter(struct nn_log* logger, const char* module, const char* fmt, ...);
+void nn_log_warn_adapter(struct nn_log* logger, const char* module, const char* fmt, ...);
+void nn_log_info_adapter(struct nn_log* logger, const char* module, const char* fmt, ...);
+void nn_log_trace_adapter(struct nn_log* logger, const char* module, const char* fmt, ...);
+
+#ifndef NN_LOG_ERROR
+#define NN_LOG_ERROR nn_log_error_adapter
+#endif
+
+#ifndef NN_LOG_WARN
+#define NN_LOG_WARN nn_log_warn_adapter
+#endif
+
+#ifndef NN_LOG_INFO
+#define NN_LOG_INFO nn_log_info_adapter
+#endif
+
+#ifndef NN_LOG_TRACE
+#define NN_LOG_TRACE nn_log_trace_adapter
+#endif
+
+#else
+
+// has variadic macros
+
 /**
  * Internal adapter for chaning the macto to varargs
  */
@@ -36,13 +63,23 @@ void nn_log_adapter(struct nn_log* logger, enum nn_log_severity severity, const 
 
 #define VA_ARGS(...) , ##__VA_ARGS__
 
+#ifndef NN_LOG_ERROR
 #define NN_LOG_ERROR(logger, module, fmt, ...) do { nn_log_adapter(logger, NN_LOG_SEVERITY_ERROR, module, __FILE__, __LINE__, fmt VA_ARGS(__VA_ARGS__)); } while (0)
+#endif
 
+#ifndef NN_LOG_WARN
 #define NN_LOG_WARN(logger, module, fmt, ...) do { nn_log_adapter(logger, NN_LOG_SEVERITY_WARN, module, __FILE__, __LINE__, fmt VA_ARGS(__VA_ARGS__)); } while (0)
+#endif
 
+#ifndef NN_LOG_INFO
 #define NN_LOG_INFO(logger, module, fmt, ...) do { nn_log_adapter(logger, NN_LOG_SEVERITY_INFO, module, __FILE__, __LINE__, fmt VA_ARGS(__VA_ARGS__)); } while (0)
+#endif
 
+#ifndef NN_LOG_TRACE
 #define NN_LOG_TRACE(logger, module, fmt, ...) do { nn_log_adapter(logger, NN_LOG_SEVERITY_TRACE, module, __FILE__, __LINE__, fmt VA_ARGS(__VA_ARGS__)); } while (0)
+#endif
+
+#endif
 
 #ifdef __cplusplus
 } //extern "C"
