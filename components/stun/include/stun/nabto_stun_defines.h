@@ -3,7 +3,8 @@
 
 #include "nabto_stun_types.h"
 #include "nabto_stun_ip_address.h"
-#include "nabto_stun_log.h"
+
+#include <nn/log.h>
 
 // Some packets in the filtering tests is expexted to be dropped by
 // the firewall. Retry these packets less times.
@@ -68,11 +69,11 @@ struct nabto_stun_result {
 
 struct nabto_stun_module {
     uint32_t (*get_stamp)(void* userData);
-    // userData in front since 
-    void (*log)(const char* file, int line, enum nabto_stun_log_level level, const char* fmt, va_list args, void* userData);
+    // userData in front since
+    struct nn_log* logger;
     // This function must put 'size' number of random bytes into 'buf'
     bool (*get_rand)(uint8_t* buf, uint16_t size, void* userData);
-};    
+};
 
 
 

@@ -3,7 +3,6 @@
 #include <streaming/nabto_stream_protocol.h>
 #include <streaming/nabto_stream_interface.h>
 #include <streaming/nabto_stream_util.h>
-#include <streaming/nabto_stream_log.h>
 #include <streaming/nabto_stream_flow_control.h>
 #include <streaming/nabto_stream_log_helper.h>
 
@@ -150,7 +149,7 @@ void nabto_stream_parse_syn(struct nabto_stream* stream, const uint8_t* ptr, con
     } while (ptr < end);
 
     if (!hasSeq) {
-        NABTO_STREAM_LOG_ERROR(stream, "invalid syn packet");
+        NN_LOG_ERROR(stream->module->logger, NABTO_STREAM_LOG_MODULE, "invalid syn packet");
         return;
     }
 
@@ -192,7 +191,7 @@ void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr,
     } while (ptr < end);
 
     if (!hasSegmentSizes || !hasSeq) {
-        NABTO_STREAM_LOG_ERROR(stream, "invalid syn|ack packet");
+        NN_LOG_ERROR(stream->module->logger, NABTO_STREAM_LOG_MODULE, "invalid syn|ack packet");
         return;
     }
 
@@ -232,7 +231,7 @@ void nabto_stream_parse_ack_extension(struct nabto_stream* stream, const uint8_t
     uint32_t delay;
 
     if ((length/8 * 8) != length) {
-        NABTO_STREAM_LOG_DEBUG(stream, "invalid number of ack gaps. %" NABTO_STREAM_PRIu16 " is not 16 + 8*n", length);
+        NN_LOG_ERROR(stream->module->logger, NABTO_STREAM_LOG_MODULE, "invalid number of ack gaps. %" NN_LOG_PRIu16 " is not 16 + 8*n", length);
     }
 
     ptr = nabto_stream_read_uint32(ptr, end, &maxAcked);
@@ -249,7 +248,7 @@ void nabto_stream_parse_ack_extension(struct nabto_stream* stream, const uint8_t
         stream->maxAdvertisedWindow = maxAcked + windowSize;
 
         if (nabto_stream_sequence_less(stream->maxAdvertisedWindow, oldAdvertisedWindow)) {
-            NABTO_STREAM_LOG_TRACE(stream, "reduce maxAdvertisedWindow to: %" NABTO_STREAM_PRIu32, stream->maxAdvertisedWindow);
+            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "reduce maxAdvertisedWindow to: %" NN_LOG_PRIu32, stream->maxAdvertisedWindow);
             nabto_stream_flow_control_advertised_window_reduced(stream);
         }
     }
@@ -566,7 +565,7 @@ uint8_t* nabto_stream_write_data_to_packet(struct nabto_stream* stream, uint8_t*
         ptr = nabto_stream_write_segment(stream, ptr, end, current, logicalTimestamp);
         *segmentsWritten += 1;
         stream->cCtrl.flightSize += 1;
-        NABTO_STREAM_LOG_TRACE(stream, "new fligtSize: %d", stream->cCtrl.flightSize);
+        NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "new fligtSize: %d", stream->cCtrl.flightSize);
 
         // remove segment from send list.
         nabto_stream_remove_segment_from_send_list(stream, current);
@@ -680,11 +679,11 @@ void nabto_stream_dump_packet(struct nabto_stream* stream, const uint8_t* buffer
     ptr = nabto_stream_read_uint32(ptr, end, &tsVal);
 
     if (ptr == NULL) {
-        NABTO_STREAM_LOG_TRACE(stream, "Invalid packet, packetSize %" NABTO_STREAM_PRIsize, bufferSize);
+        NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "Invalid packet, packetSize %" NN_LOG_PRIsize, bufferSize);
         return;
     }
 
-    NABTO_STREAM_LOG_TRACE(stream, "%s, Packet type %s, size %" NABTO_STREAM_PRIsize ", timestamp: %" NABTO_STREAM_PRIu32,
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "%s, Packet type %s, size %" NN_LOG_PRIsize ", timestamp: %" NN_LOG_PRIu32,
                            extraDescription,
                            nabto_stream_flags_to_string(flags),
                            bufferSize, tsVal);
@@ -696,11 +695,11 @@ void nabto_stream_dump_packet(struct nabto_stream* stream, const uint8_t* buffer
         ptr = nabto_stream_read_uint16(ptr, end, &extensionType);
         ptr = nabto_stream_read_uint16(ptr, end, &length);
         if (ptr == NULL) {
-            NABTO_STREAM_LOG_TRACE(stream, "  Invalid extension formatting in packet");
+            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Invalid extension formatting in packet");
             return;
         }
         if (ptr + length > end) {
-            NABTO_STREAM_LOG_TRACE(stream, "  Extension is larger than the packet");
+            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Extension is larger than the packet");
             return;
         }
 
@@ -717,46 +716,46 @@ void nabto_stream_dump_packet(struct nabto_stream* stream, const uint8_t* buffer
             extPtr = nabto_stream_read_uint32(extPtr, extEnd, &tsEcr);
             extPtr = nabto_stream_read_uint32(extPtr, extEnd, &delay);
             if (extPtr == NULL) {
-                NABTO_STREAM_LOG_TRACE(stream, "  Bad format of ACK packet");
+                NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Bad format of ACK packet");
                 return;
             }
             size_t rest = extEnd - extPtr;
             size_t gaps = rest/8;
-            NABTO_STREAM_LOG_TRACE(stream, "  Ack Extension. MaxAcked: %" NABTO_STREAM_PRIu32 ", windowSize: %" NABTO_STREAM_PRIu32 ", timestampEcho %" NABTO_STREAM_PRIu32 ", delay: %" NABTO_STREAM_PRIu32 ", sack pairs: %" NABTO_STREAM_PRIsize,
+            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Ack Extension. MaxAcked: %" NN_LOG_PRIu32 ", windowSize: %" NN_LOG_PRIu32 ", timestampEcho %" NN_LOG_PRIu32 ", delay: %" NN_LOG_PRIu32 ", sack pairs: %" NN_LOG_PRIsize,
                                    maxAcked, windowSize, tsEcr, delay, gaps);
             for (size_t i = 0; i < gaps; i++) {
                 uint32_t ackGap = 0;
                 uint32_t nackGap = 0;
                 extPtr = nabto_stream_read_uint32(extPtr, extEnd, &ackGap);
                 extPtr = nabto_stream_read_uint32(extPtr, extEnd, &nackGap);
-                NABTO_STREAM_LOG_TRACE(stream, "    Sack ackGap: %" NABTO_STREAM_PRIu32 ", nackGap: %" NABTO_STREAM_PRIu32, ackGap, nackGap);
+                NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "    Sack ackGap: %" NN_LOG_PRIu32 ", nackGap: %" NN_LOG_PRIu32, ackGap, nackGap);
             }
         } else if (extensionType == NABTO_STREAM_EXTENSION_DATA) {
             uint32_t seq = 0;
             extPtr = nabto_stream_read_uint32(extPtr, extEnd, &seq);
-            NABTO_STREAM_LOG_TRACE(stream, "  Data extension. Sequence number: %" NABTO_STREAM_PRIu32 ", data length: %" NABTO_STREAM_PRIu16, seq, length - 4);
+            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Data extension. Sequence number: %" NN_LOG_PRIu32 ", data length: %" NN_LOG_PRIu16, seq, length - 4);
         } else if (extensionType == NABTO_STREAM_EXTENSION_FIN) {
             uint32_t finSeq = 0;
             extPtr = nabto_stream_read_uint32(extPtr, extEnd, &finSeq);
-            NABTO_STREAM_LOG_TRACE(stream, "  Fin extension. fin sequence: %" NABTO_STREAM_PRIu32, finSeq);
+            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Fin extension. fin sequence: %" NN_LOG_PRIu32, finSeq);
         } else if (extensionType == NABTO_STREAM_EXTENSION_SEGMENT_SIZES) {
             uint16_t maxSendSegmentSize = 0;
             uint16_t maxRecvSegmentSize = 0;
             extPtr = nabto_stream_read_uint16(extPtr, extEnd, &maxSendSegmentSize);
             extPtr = nabto_stream_read_uint16(extPtr, extEnd, &maxRecvSegmentSize);
-            NABTO_STREAM_LOG_TRACE(stream, "  Segment Sizes extension. MaxSendSegmentSize: %" NABTO_STREAM_PRIu16 " macRecvSegmentSize: %" NABTO_STREAM_PRIu16, maxSendSegmentSize, maxRecvSegmentSize);
+            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Segment Sizes extension. MaxSendSegmentSize: %" NN_LOG_PRIu16 " macRecvSegmentSize: %" NN_LOG_PRIu16, maxSendSegmentSize, maxRecvSegmentSize);
         } else if (extensionType == NABTO_STREAM_EXTENSION_CONTENT_TYPE) {
             uint32_t contentType = 0;
             extPtr = nabto_stream_read_uint32(extPtr, extEnd, &contentType);
-            NABTO_STREAM_LOG_TRACE(stream, "  Content Type extension. ContentType: %" NABTO_STREAM_PRIu32, contentType);
+            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Content Type extension. ContentType: %" NN_LOG_PRIu32, contentType);
         } else if (extensionType == NABTO_STREAM_EXTENSION_EXTRA_DATA) {
-            NABTO_STREAM_LOG_TRACE(stream, "  Extra Data extension dataLength: %" NABTO_STREAM_PRIu16, length);
+            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Extra Data extension dataLength: %" NN_LOG_PRIu16, length);
         } else if (extensionType == NABTO_STREAM_EXTENSION_SYN) {
             uint32_t synSeq = 0;
             extPtr = nabto_stream_read_uint32(extPtr, extEnd, &synSeq);
-            NABTO_STREAM_LOG_TRACE(stream, "  Syn sequence number: %" NABTO_STREAM_PRIu32, synSeq);
+            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Syn sequence number: %" NN_LOG_PRIu32, synSeq);
         } else {
-            NABTO_STREAM_LOG_TRACE(stream, "  Unknown extension type: %" NABTO_STREAM_PRIu16 ", length: %" NABTO_STREAM_PRIu16, extensionType, length);
+            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Unknown extension type: %" NN_LOG_PRIu16 ", length: %" NN_LOG_PRIu16, extensionType, length);
         }
 
         // iterate to next extension

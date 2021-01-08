@@ -13,19 +13,20 @@
 
 #include "nabto_stream_config.h"
 #include "nabto_stream_types.h"
-#include "nabto_stream_log.h"
 
 
 #include <stddef.h>
 #include <stdarg.h>
 #include <stdbool.h>
 
+#include <nn/log.h>
+
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
-
+#define NABTO_STREAM_LOG_MODULE "stream"
 
 enum {
     NABTO_STREAM_DEFAULT_TIMEOUT = 1000,
@@ -239,7 +240,7 @@ enum nabto_stream_module_event {
 struct nabto_stream_module {
     uint32_t (*get_stamp)(void* userData);
     // userData in front since
-    void (*log)(const char* file, int line, enum nabto_stream_log_level level, const char* fmt, va_list args, void* userData);
+    struct nn_log* logger;
     struct nabto_stream_send_segment* (*alloc_send_segment)(size_t bufferSize, void* userData);
     void (*free_send_segment)(struct nabto_stream_send_segment* segment, void* userData);
     /* void (*add_to_send_segment_wait_list)(struct nabto_stream* stream, void* userData); */
@@ -530,7 +531,7 @@ void nabto_stream_mark_segment_for_retransmission(struct nabto_stream* stream, s
  */
 #define SET_STATE(s, newst) \
     if (s->state != newst) { \
-        NABTO_STREAM_LOG_TRACE(s, " STATE: %s -> %s", nabto_stream_state_as_string(s->state), nabto_stream_state_as_string(newst)); \
+        NN_LOG_TRACE(s->module->logger, "stream", " STATE: %s -> %s", nabto_stream_state_as_string(s->state), nabto_stream_state_as_string(newst)); \
         nabto_stream_state_transition(s, newst); \
     }
 

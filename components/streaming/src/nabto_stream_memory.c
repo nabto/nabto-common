@@ -26,7 +26,7 @@ void nabto_stream_allocate_next_send_segment(struct nabto_stream* stream)
     }
     stream->nextUnfilledSendSegment = stream->module->alloc_send_segment(stream->maxSendSegmentSize, stream->moduleUserData);
     if (stream->nextUnfilledSendSegment == NULL) {
-        NABTO_STREAM_LOG_TRACE(stream, "Can not allocate send segment going to NEED_SEND_SEGMENT state");
+        NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "Can not allocate send segment going to NEED_SEND_SEGMENT state");
         stream->sendSegmentAllocationStamp = nabto_stream_get_future_stamp(stream, NABTO_STREAM_SEGMENT_ALLOCATION_RETRY_INTERVAL);
         return;
     }
@@ -44,7 +44,7 @@ bool nabto_stream_allocate_next_recv_segment(struct nabto_stream* stream)
     struct nabto_stream_recv_segment* segment = stream->module->alloc_recv_segment(stream->maxRecvSegmentSize, stream->moduleUserData);
 
     if (segment == NULL) {
-        NABTO_STREAM_LOG_TRACE(stream, "Can not allocate recv segment going to NEED_RECV_SEGMENT state");
+        NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "Can not allocate recv segment going to NEED_RECV_SEGMENT state");
         stream->recvSegmentAllocationStamp = nabto_stream_get_future_stamp(stream, NABTO_STREAM_SEGMENT_ALLOCATION_RETRY_INTERVAL);
         return false;
     }

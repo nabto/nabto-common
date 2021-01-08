@@ -2,10 +2,17 @@
 #define _NN_LOG_H_
 
 #include <stdarg.h>
+#include <inttypes.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#define NN_LOG_PRIu8  PRIu8
+#define NN_LOG_PRIu16 PRIu16
+#define NN_LOG_PRIu32 PRIu32
+#define NN_LOG_PRIsize "zu"
+
 
 enum nn_log_severity {
     NN_LOG_SEVERITY_ERROR = 0x01,

@@ -74,7 +74,7 @@ nabto_stream_status nabto_stream_write_buffer(struct nabto_stream* stream, const
         return NABTO_STREAM_STATUS_ABORTED;
     }
 
-    NABTO_STREAM_LOG_TRACE(stream, "nabto_stream_write_buffer %d", bufferSize);
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "nabto_stream_write_buffer %d", bufferSize);
     size_t queued = 0;
 
     if (!
@@ -102,7 +102,7 @@ nabto_stream_status nabto_stream_write_buffer(struct nabto_stream* stream, const
 
             uint16_t sz;
             sz = (uint16_t)NABTO_STREAM_MIN(bufferSize, stream->maxSendSegmentSize);
-            NABTO_STREAM_LOG_TRACE(stream, "-------- nabto_stream_write %i bytes, seq=%" NABTO_STREAM_PRIu32, sz, segment->seq);
+            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "-------- nabto_stream_write %i bytes, seq=%" NN_LOG_PRIu32, sz, segment->seq);
 
             memcpy(segment->buf, (const void*) buffer, sz);
             segment->used = sz;
@@ -115,7 +115,7 @@ nabto_stream_status nabto_stream_write_buffer(struct nabto_stream* stream, const
             if (stream->timeoutStamp.type == NABTO_STREAM_STAMP_INFINITE)
             {
                 // Restart the data timeout timer.
-                NABTO_STREAM_LOG_TRACE(stream, "restart retransmission timer %" NABTO_STREAM_PRIu16, stream->cCtrl.rto);
+                NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "restart retransmission timer %" NN_LOG_PRIu16, stream->cCtrl.rto);
                 stream->timeoutStamp = nabto_stream_get_future_stamp(stream, stream->cCtrl.rto);
             }
 
@@ -187,7 +187,7 @@ nabto_stream_status nabto_stream_read_buffer_once(struct nabto_stream* stream, u
 
         segment->used += (uint16_t)avail;
         *readen = avail;
-        NABTO_STREAM_LOG_TRACE(stream, "Retrieving data from seq=%" NABTO_STREAM_PRIu32 " size=%i", segment->seq, (uint16_t)avail);
+        NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "Retrieving data from seq=%" NN_LOG_PRIu32 " size=%i", segment->seq, (uint16_t)avail);
         if (segment->size == segment->used) {
             nabto_stream_remove_segment_from_recv_list(segment);
             nabto_stream_free_recv_segment(stream, segment);
@@ -219,7 +219,7 @@ nabto_stream_status nabto_stream_read_buffer(struct nabto_stream* stream, uint8_
 
 nabto_stream_status nabto_stream_close(struct nabto_stream* stream)
 {
-    NABTO_STREAM_LOG_TRACE(stream, "nabto_stream_close in state %s", nabto_stream_state_as_string(stream->state));
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "nabto_stream_close in state %s", nabto_stream_state_as_string(stream->state));
     nabto_stream_state state = stream->state;
 
     if (state == ST_ABORTED_RST ||

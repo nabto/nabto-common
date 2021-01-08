@@ -25,7 +25,7 @@ void nabto_stream_congestion_control_init(struct nabto_stream* stream)
 void nabto_stream_congestion_control_adjust_ssthresh_after_triple_ack(struct nabto_stream* stream, struct nabto_stream_send_segment* segment) {
     if (!stream->cCtrl.lostSegment) {
         stream->cCtrl.ssThreshold = (uint32_t)NABTO_STREAM_MAX(stream->cCtrl.flightSize/2.0, NABTO_STREAM_SLOW_START_MIN_VALUE);
-        NABTO_STREAM_LOG_TRACE(stream, "Setting ssThreshold: %" PRIu32 ", flightSize: %" PRIu32, stream->cCtrl.ssThreshold, stream->cCtrl.flightSize);
+        NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "Setting ssThreshold: %" NN_LOG_PRIu32 ", flightSize: %" NN_LOG_PRIu32, stream->cCtrl.ssThreshold, stream->cCtrl.flightSize);
         nabto_stream_stats_observe(&stream->ccStats.ssThreshold, stream->cCtrl.ssThreshold);
         stream->cCtrl.lostSegment = true;
         stream->cCtrl.lostSegmentSeq = segment->seq;
@@ -36,7 +36,7 @@ void nabto_stream_congestion_control_adjust_ssthresh_after_triple_ack(struct nab
  * Called after a streaming data packet has been resent.
  */
 void nabto_stream_congestion_control_timeout(struct nabto_stream* stream) {
-    NABTO_STREAM_LOG_TRACE(stream, "nabto_stream_congestion_control_timeout");
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "nabto_stream_congestion_control_timeout");
     // In the case of dual resending we cannot simply use cwnd as
     // a measure for the flight size since we could have reset it
     // in a previous resending.
@@ -71,7 +71,7 @@ void nabto_stream_congestion_control_handle_ack(struct nabto_stream* stream, str
     }
 
     if (nabto_stream_congestion_control_use_slow_start(stream)) {
-        NABTO_STREAM_LOG_TRACE(stream, "slow starting! %f", stream->cCtrl.cwnd);
+        NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "slow starting! %f", stream->cCtrl.cwnd);
         stream->cCtrl.cwnd += 2;
     } else {
         // congestion avoidance
@@ -93,7 +93,7 @@ void nabto_stream_congestion_control_handle_ack(struct nabto_stream* stream, str
 
     nabto_stream_stats_observe(&stream->ccStats.cwnd, stream->cCtrl.cwnd);
 
-    NABTO_STREAM_LOG_TRACE(stream, "adjusting cwnd: %f, ssThreshold: %" NABTO_STREAM_PRIu32 ", flightSize %d", stream->cCtrl.cwnd, stream->cCtrl.ssThreshold, stream->cCtrl.flightSize);
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "adjusting cwnd: %f, ssThreshold: %" NN_LOG_PRIu32 ", flightSize %d", stream->cCtrl.cwnd, stream->cCtrl.ssThreshold, stream->cCtrl.flightSize);
 
 }
 
@@ -124,7 +124,7 @@ bool nabto_stream_congestion_control_accept_more_data(struct nabto_stream* strea
     {
         return true;
     } else {
-        NABTO_STREAM_LOG_TRACE(stream, "Stream  does not accept more data notSent: %" NABTO_STREAM_PRIu32 ", cwnd %f", nabto_stream_congestion_control_not_sent_segments(stream), stream->cCtrl.cwnd);
+        NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "Stream  does not accept more data notSent: %" NN_LOG_PRIu32 ", cwnd %f", nabto_stream_congestion_control_not_sent_segments(stream), stream->cCtrl.cwnd);
         return false;
     }
 }
@@ -170,7 +170,7 @@ void nabto_stream_update_congestion_control_receive_stats(struct nabto_stream* s
         nabto_stream_stats_observe(&stream->ccStats.rtt, time);
         stream->cCtrl.rto = (uint32_t)(stream->cCtrl.srtt + 4.0*stream->cCtrl.rttVar);
 
-        NABTO_STREAM_LOG_TRACE(stream, "packet time %f, stream->srtt %f, stream->rttVar %f, stream->rto %" NABTO_STREAM_PRIu16, time, stream->cCtrl.srtt, stream->cCtrl.rttVar, stream->cCtrl.rto);
+        NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "packet time %f, stream->srtt %f, stream->rttVar %f, stream->rto %" NN_LOG_PRIu16, time, stream->cCtrl.srtt, stream->cCtrl.rttVar, stream->cCtrl.rto);
 
 
         /**

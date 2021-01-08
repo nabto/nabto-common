@@ -9,6 +9,8 @@
 extern "C" {
 #endif
 
+#define LOG_MODULE "stun"
+
 void nabto_stun_init(struct nabto_stun* stun, struct nabto_stun_module* mod, void* modUserData, struct nabto_stun_endpoint* eps, uint8_t numEps)
 {
     stun->module = mod;
@@ -178,7 +180,7 @@ bool nabto_stun_check_transaction_id(struct nabto_stun_message* test, const uint
 
 void nabto_stun_handle_packet(struct nabto_stun* stun, const uint8_t* buf, uint16_t size)
 {
-    NABTO_STUN_LOG_TRACE(stun, "nabto_stun_handle_packet, size: %u", size);
+    NN_LOG_TRACE(stun->module->logger, LOG_MODULE, "nabto_stun_handle_packet, size: %u", size);
     switch(stun->state) {
         case STUN_INITIAL_TEST:
             if(nabto_stun_decode_message(&stun->test1, buf, size)) {
@@ -196,7 +198,7 @@ void nabto_stun_handle_packet(struct nabto_stun* stun, const uint8_t* buf, uint1
                 stun->test1.state = COMPLETED;
 
             } else {
-                NABTO_STUN_LOG_ERROR(stun, "decode initial test message failed");
+                NN_LOG_TRACE(stun->module->logger, LOG_MODULE, "decode initial test message failed");
             }
             break;
         case STUN_TESTING:
@@ -207,7 +209,7 @@ void nabto_stun_handle_packet(struct nabto_stun* stun, const uint8_t* buf, uint1
                         stun->tests[i].state = COMPLETED;
                         return;
                     } else {
-                        NABTO_STUN_LOG_ERROR(stun, "decode test message failed");
+                        NN_LOG_ERROR(stun->module->logger, LOG_MODULE, "decode test message failed");
                     }
                 }
             }
@@ -220,7 +222,7 @@ void nabto_stun_handle_packet(struct nabto_stun* stun, const uint8_t* buf, uint1
                     nabto_stun_compute_result_and_stop(stun);
                     return;
                 } else {
-                    NABTO_STUN_LOG_ERROR(stun, "decode defect router test message failed");
+                    NN_LOG_ERROR(stun->module->logger, LOG_MODULE, "decode defect router test message failed");
                 }
             }
             break;

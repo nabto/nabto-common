@@ -4,6 +4,8 @@
 #include "nabto_stream_types.h"
 #include "nabto_stream_window.h"
 
+
+
 #ifdef __cplusplus
 extern "C"
 {

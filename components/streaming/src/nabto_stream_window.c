@@ -12,7 +12,6 @@
 #include <streaming/nabto_stream_protocol.h>
 #include <streaming/nabto_stream_interface.h>
 #include <streaming/nabto_stream_util.h>
-#include <streaming/nabto_stream_log.h>
 #include <streaming/nabto_stream_congestion_control.h>
 #include <streaming/nabto_stream_flow_control.h>
 #include <streaming/nabto_stream_memory.h>
@@ -475,9 +474,9 @@ struct nabto_stream_send_segment* nabto_stream_handle_ack_iterator(struct nabto_
     }
 
     if (iterator == &stream->finSegment) {
-        NABTO_STREAM_LOG_TRACE(stream, "acking fin segment %" NABTO_STREAM_PRIu32, iterator->seq);
+        NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "acking fin segment %" NN_LOG_PRIu32, iterator->seq);
     } else {
-        NABTO_STREAM_LOG_TRACE(stream, "acking data segment %" NABTO_STREAM_PRIu32, iterator->seq);
+        NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "acking data segment %" NN_LOG_PRIu32, iterator->seq);
     }
     //ack segment
     nabto_stream_update_congestion_control_receive_stats(stream, iterator, timestampEcho);
@@ -591,22 +590,22 @@ void nabto_stream_mark_segment_for_retransmission(struct nabto_stream* stream, s
 
 
 void nabto_stream_dump_state(struct nabto_stream* stream) {
-    NABTO_STREAM_LOG_TRACE(stream, "dump of nabto_stream");
-    NABTO_STREAM_LOG_TRACE(stream, " state %i", stream->state);
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "dump of nabto_stream");
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, " state %i", stream->state);
 
-    NABTO_STREAM_LOG_TRACE(stream, " stream ");
-    NABTO_STREAM_LOG_TRACE(stream, "  state %i", stream->state);
-    NABTO_STREAM_LOG_TRACE(stream, "  retransCount %i", stream->retransCount);
-    NABTO_STREAM_LOG_TRACE(stream, "  xmitMaxAllocated %" NABTO_STREAM_PRIu32, stream->xmitMaxAllocated);
-    NABTO_STREAM_LOG_TRACE(stream, "  finSent %i", stream->finSegment.seq);
-    NABTO_STREAM_LOG_TRACE(stream, "  maxAdvertisedWindow %" NABTO_STREAM_PRIu32, stream->maxAdvertisedWindow);
-    NABTO_STREAM_LOG_TRACE(stream, " congestion control");
-    NABTO_STREAM_LOG_TRACE(stream, "  srtt %f", stream->cCtrl.srtt);
-    NABTO_STREAM_LOG_TRACE(stream, "  rttVar %f", stream->cCtrl.rttVar);
-    NABTO_STREAM_LOG_TRACE(stream, "  rto %" NABTO_STREAM_PRIu16, stream->cCtrl.rto);
-    NABTO_STREAM_LOG_TRACE(stream, "  cwnd %f", stream->cCtrl.cwnd);
-    NABTO_STREAM_LOG_TRACE(stream, "  ssThreshold %" NABTO_STREAM_PRIu32, stream->cCtrl.ssThreshold);
-    NABTO_STREAM_LOG_TRACE(stream, "  flightSize %" NABTO_STREAM_PRIu32, stream->cCtrl.flightSize);
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, " stream ");
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  state %i", stream->state);
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  retransCount %i", stream->retransCount);
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  xmitMaxAllocated %" NN_LOG_PRIu32, stream->xmitMaxAllocated);
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  finSent %i", stream->finSegment.seq);
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  maxAdvertisedWindow %" NN_LOG_PRIu32, stream->maxAdvertisedWindow);
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, " congestion control");
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  srtt %f", stream->cCtrl.srtt);
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  rttVar %f", stream->cCtrl.rttVar);
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  rto %" NN_LOG_PRIu16, stream->cCtrl.rto);
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  cwnd %f", stream->cCtrl.cwnd);
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  ssThreshold %" NN_LOG_PRIu32, stream->cCtrl.ssThreshold);
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  flightSize %" NN_LOG_PRIu32, stream->cCtrl.flightSize);
 }
 
 void nabto_stat_init(struct nabto_stats* stat)
@@ -740,7 +739,7 @@ void nabto_stream_handle_fin(struct nabto_stream* stream, uint32_t seq)
 
 void nabto_stream_handle_data(struct nabto_stream* stream, uint32_t seq, const uint8_t* data, uint16_t dataLength)
 {
-    NABTO_STREAM_LOG_TRACE(stream, "handle data segment: %" NABTO_STREAM_PRIu32 " size: %" NABTO_STREAM_PRIu16, seq, dataLength);
+    NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "handle data segment: %" NN_LOG_PRIu32 " size: %" NN_LOG_PRIu16, seq, dataLength);
     if (dataLength > stream->maxRecvSegmentSize) {
         // invalid data drop it.
         return;
@@ -755,7 +754,7 @@ void nabto_stream_handle_data(struct nabto_stream* stream, uint32_t seq, const u
             // we are expecting this sequence number to be in the recvWindow.
             struct nabto_stream_recv_segment* recvBuffer = nabto_stream_find_recv_buffer(stream, seq);
             if (!recvBuffer) {
-                NABTO_STREAM_LOG_TRACE(stream, "data outside of recv window %" NABTO_STREAM_PRIu32 " data is dropped", seq);
+                NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "data outside of recv window %" NN_LOG_PRIu32 " data is dropped", seq);
                 stream->imediateAck = true;
             } else {
                 if (recvBuffer->state != RB_IDLE) {
@@ -777,7 +776,7 @@ void nabto_stream_handle_data(struct nabto_stream* stream, uint32_t seq, const u
                 }
             }
         } else {
-            NABTO_STREAM_LOG_TRACE(stream, "sequence number: %" NABTO_STREAM_PRIu32 " is from the past, send a new ack", seq);
+            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "sequence number: %" NN_LOG_PRIu32 " is from the past, send a new ack", seq);
             // retransmitted data from past
             stream->imediateAck = true;
         }
@@ -788,7 +787,7 @@ void nabto_stream_move_segments_from_recv_window_to_recv_read(struct nabto_strea
 {
     struct nabto_stream_recv_segment* iterator = stream->recvWindow->next;
     while( iterator != stream->recvWindow && iterator->state == RB_DATA) {
-        NABTO_STREAM_LOG_TRACE(stream, "moving seq: %" NABTO_STREAM_PRIu32 " to recvRead", iterator->seq);
+        NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "moving seq: %" NN_LOG_PRIu32 " to recvRead", iterator->seq);
         struct nabto_stream_recv_segment* next = iterator->next;
         nabto_stream_remove_segment_from_recv_list(iterator);
         nabto_stream_add_segment_to_recv_list_before_elm(stream->recvRead, iterator);

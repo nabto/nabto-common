@@ -14,7 +14,7 @@ const char* nabto_stream_stamp_to_string(nabto_stream_stamp s)
     } else if (s.type == NABTO_STREAM_STAMP_NOW) {
         sprintf(buffer, "NOW");
     } else {
-        sprintf(buffer, "%" NABTO_STREAM_PRIu32, s.stamp);
+        sprintf(buffer, "%" NN_LOG_PRIu32, s.stamp);
     }
     return buffer;
 }
