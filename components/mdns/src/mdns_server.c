@@ -124,6 +124,9 @@ static const uint8_t* skip_name(const uint8_t* ptr, const uint8_t* end)
 bool nabto_mdns_server_handle_packet(struct nabto_mdns_server_context* context,
                                      const uint8_t* buffer, size_t bufferSize, uint16_t* id)
 {
+    if (context->instanceName == NULL) {
+        return false; // not running 
+    }
     uint16_t flags;
     // TODO: this discards const qualifier
     const uint8_t* ptr = buffer;
@@ -192,6 +195,9 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
                                     uint8_t* buffer, size_t bufferSize, size_t* written)
 
 {
+    if (context->instanceName == NULL) {
+        return false; // not running 
+    }
     uint8_t* ptr = buffer;
     uint8_t* end = buffer + bufferSize;
 
