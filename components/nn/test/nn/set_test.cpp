@@ -76,10 +76,10 @@ BOOST_AUTO_TEST_CASE(iterator)
     nn_set_insert(&set, &bar);
 
     std::set<int> items;
-    const void* item;
-    NN_SET_FOREACH(item, &set)
+    int item;
+    NN_SET_FOREACH(&item, &set)
     {
-        items.insert(*(int*)(item));
+        items.insert(item);
     }
 
     BOOST_TEST(items.count(2) == (size_t)1);

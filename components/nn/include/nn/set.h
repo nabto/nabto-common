@@ -90,11 +90,11 @@ bool nn_set_is_end(const struct nn_set_iterator* it);
 void nn_set_next(struct nn_set_iterator* it);
 
 /**
- * Get a reference to the item at the iterators position.
+ * Get a the item at the iterators position.
  */
-const void* nn_set_get_element(const struct nn_set_iterator* it);
+void nn_set_get_element(const struct nn_set_iterator* it, void* item);
 
-#define NN_SET_FOREACH(reference, set) for(struct nn_set_iterator it = nn_set_begin(set); reference = nn_set_get_element(&it), !nn_set_is_end(&it); nn_set_next(&it))
+#define NN_SET_FOREACH(item, set) for(struct nn_set_iterator it = nn_set_begin(set); nn_set_get_element(&it, item), !nn_set_is_end(&it); nn_set_next(&it))
 
 
 

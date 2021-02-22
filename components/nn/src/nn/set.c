@@ -93,9 +93,7 @@ void nn_set_next(struct nn_set_iterator* it)
     nn_vector_next(&it->it);
 }
 
-const void* nn_set_get_element(const struct nn_set_iterator* it)
+void nn_set_get_element(const struct nn_set_iterator* it, void* item)
 {
-    const void* s;
-    s = nn_vector_get_reference(&it->it);
-    return s;
+    nn_vector_get_element(&it->it, item);
 }
