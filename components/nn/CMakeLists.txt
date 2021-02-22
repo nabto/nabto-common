@@ -11,6 +11,7 @@ set(src
   src/nn/log.c
   src/nn/llist.c
   src/nn/string_map.c
+  src/nn/set.c
   )
 
 add_library(nn "${src}")
@@ -29,6 +30,7 @@ if (NN_BUILD_TESTS)
     test/nn/log_test.cpp
     test/nn/llist_test.cpp
     test/nn/string_map_test.cpp
+    test/nn/set_test.cpp
     test/unit_test.cpp
 
     )

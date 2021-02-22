@@ -43,6 +43,11 @@ size_t nn_vector_size(const struct nn_vector* vector);
 void nn_vector_get(const struct nn_vector* vector, size_t index, void* element);
 
 /**
+ * Get the pointer to the element at a specific index.
+ */
+const void* nn_vector_reference(const struct nn_vector* vector, size_t index);
+
+/**
  * return true iff the vector is empty
  */
 bool nn_vector_empty(const struct nn_vector* vector);
@@ -68,6 +73,11 @@ struct nn_vector_iterator nn_vector_begin(const struct nn_vector* vector);
 void nn_vector_get_element(const struct nn_vector_iterator* it, void* element);
 
 /**
+ * Get the reference to the element the iterator is at.
+ */
+const void* nn_vector_get_reference(const struct nn_vector_iterator* it);
+
+/**
  * increment the iterator.
  */
 void nn_vector_next(struct nn_vector_iterator* it);
@@ -81,6 +91,11 @@ bool nn_vector_is_end(const struct nn_vector_iterator* it);
  * Helper macro to iterate over all elements in the vector
  */
 #define NN_VECTOR_FOREACH(element, vector) for (struct nn_vector_iterator it = nn_vector_begin(vector); nn_vector_get_element(&it, element), !nn_vector_is_end(&it); nn_vector_next(&it))
+
+/**
+ * Helper macro to iterate over all elements in the vector by their reference
+ */
+#define NN_VECTOR_FOREACH_REFERENCE(reference, vector) for (struct nn_vector_iterator it = nn_vector_begin(vector); reference = nn_vector_get_reference(&it), !nn_vector_is_end(&it); nn_vector_next(&it))
 
 #ifdef __cplusplus
 } //extern "C"
