@@ -70,7 +70,7 @@ void nn_vector_get(const struct nn_vector* vector, size_t index, void* element)
 
 void* nn_vector_reference(const struct nn_vector* vector, size_t index)
 {
-    return vector->elements + (index * vector->itemSize);
+    return (void*)(uint8_t*)vector->elements + (index * vector->itemSize);
 }
 
 void nn_vector_clear(struct nn_vector* vector)
@@ -104,5 +104,5 @@ void nn_vector_get_element(const struct nn_vector_iterator* iterator, void* elem
 void* nn_vector_get_reference(const struct nn_vector_iterator* it)
 {
     const struct nn_vector* vector = it->vector;
-    return vector->elements + (it->current * vector->itemSize);
+    return nn_vector_reference(vector, it->current);
 }
