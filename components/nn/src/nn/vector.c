@@ -70,7 +70,7 @@ void nn_vector_get(const struct nn_vector* vector, size_t index, void* element)
 
 void* nn_vector_reference(const struct nn_vector* vector, size_t index)
 {
-    return (void*)(uint8_t*)vector->elements + (index * vector->itemSize);
+    return (void*)((uint8_t*)vector->elements + (index * vector->itemSize));
 }
 
 void nn_vector_clear(struct nn_vector* vector)
