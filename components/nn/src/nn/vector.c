@@ -68,7 +68,7 @@ void nn_vector_get(const struct nn_vector* vector, size_t index, void* element)
     }
 }
 
-const void* nn_vector_reference(const struct nn_vector* vector, size_t index)
+void* nn_vector_reference(const struct nn_vector* vector, size_t index)
 {
     return vector->elements + (index * vector->itemSize);
 }
@@ -101,7 +101,7 @@ void nn_vector_get_element(const struct nn_vector_iterator* iterator, void* elem
     nn_vector_get(iterator->vector, iterator->current, element);
 }
 
-const void* nn_vector_get_reference(const struct nn_vector_iterator* it)
+void* nn_vector_get_reference(const struct nn_vector_iterator* it)
 {
     const struct nn_vector* vector = it->vector;
     return vector->elements + (it->current * vector->itemSize);

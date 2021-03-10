@@ -45,7 +45,7 @@ void nn_vector_get(const struct nn_vector* vector, size_t index, void* element);
 /**
  * Get the pointer to the element at a specific index.
  */
-const void* nn_vector_reference(const struct nn_vector* vector, size_t index);
+void* nn_vector_reference(const struct nn_vector* vector, size_t index);
 
 /**
  * return true iff the vector is empty
@@ -75,7 +75,7 @@ void nn_vector_get_element(const struct nn_vector_iterator* it, void* element);
 /**
  * Get the reference to the element the iterator is at.
  */
-const void* nn_vector_get_reference(const struct nn_vector_iterator* it);
+void* nn_vector_get_reference(const struct nn_vector_iterator* it);
 
 /**
  * increment the iterator.
