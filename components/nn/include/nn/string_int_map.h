@@ -1,0 +1,91 @@
+#ifndef _NN_STRING_INT_MAP_H_
+#define _NN_STRING_INT_MAP_H_
+
+/**
+ * kv map string->int
+ */
+
+#include <nn/llist.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+struct nn_string_int_map_item {
+    struct nn_llist_node node;
+    char* key;
+    int value;
+};
+
+struct nn_string_int_map {
+    struct nn_llist items;
+};
+
+struct nn_string_int_map_iterator {
+    struct nn_llist_iterator it;
+};
+
+/**
+ * Initialize a string map
+ */
+void nn_string_int_map_init(struct nn_string_int_map* map);
+
+/**
+ * Deinitialize a string map
+ */
+void nn_string_int_map_deinit(struct nn_string_int_map* map);
+
+/**
+ * If an item with the key exists return an iterator pointing at the device else return an iterator which is end.
+ */
+struct nn_string_int_map_iterator nn_string_int_map_get(const struct nn_string_int_map* map, const char* key);
+
+/**
+ * Insert an item into a string int map.
+ *
+ * If an item with the given key already exists a pointer to that item
+ * is returned.  If the item could not be inserted, an iterator
+ * pointing at the end is returned such that !nn_string_map_end(&it) == true;
+ */
+struct nn_string_int_map_iterator nn_string_int_map_insert(struct nn_string_int_map* map, const char* key, int value);
+
+/**
+ * Erase a key from the map
+ */
+void nn_string_int_map_erase(struct nn_string_int_map* map, const char* key);
+
+/**
+ * erase a key from the map based on its iterator.
+ */
+void nn_string_int_map_erase_iterator(struct nn_string_int_map* map, struct nn_string_int_map_iterator* it);
+
+/**
+ * Return the key for an item.
+ */
+const char* nn_string_int_map_key(struct nn_string_int_map_iterator* it);
+
+/**
+ * Return the value for an item.
+ */
+int nn_string_int_map_value(struct nn_string_int_map_iterator* it);
+
+/**
+ * return a iterator to the start of the key value map
+ */
+struct nn_string_int_map_iterator nn_string_int_map_begin(const struct nn_string_int_map* map);
+
+/**
+ * return iterator to the end of the map.
+ */
+struct nn_string_int_map_iterator nn_string_int_map_end(const struct nn_string_int_map* map);
+
+/**
+ * return true if the iterator is at the end.
+ */
+bool nn_string_int_map_is_end(const struct nn_string_int_map_iterator* it);
+
+#ifdef __cplusplus
+} //extern "C"
+#endif
+
+#endif

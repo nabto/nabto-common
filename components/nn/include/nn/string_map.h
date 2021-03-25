@@ -37,7 +37,7 @@ void nn_string_map_deinit(struct nn_string_map* map);
 
 
 /**
- * If an item with the key exists return it, else return NULL;
+ * If an item with the key exists return an iterator pointing at the device else return an iterator which is end.
  */
 struct nn_string_map_iterator nn_string_map_get(const struct nn_string_map* map, const char* key);
 struct nn_string_map_iterator nn_string_map_getn(const struct nn_string_map* map, const char* key, size_t keyLength);
