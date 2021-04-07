@@ -32,7 +32,7 @@ void nabto_stream_state_transition(struct nabto_stream* stream, nabto_stream_sta
     nabto_stream_state oldState = stream->state;
     if (stream->state == new_state) return;
     stream->state = new_state;
-    nabto_stream_dump_state(stream);
+    //nabto_stream_dump_state(stream);
     stream->retransCount = 0;
 
     switch(new_state) {
@@ -137,12 +137,25 @@ void nabto_stream_init(struct nabto_stream* stream, struct nabto_stream_module* 
     // test that logical timestamps can wrap around.
     stream->logicalTimestamp = 0;
 
+
+    stream->disableReplayProtection = false;
+
     stream->sendSegmentAllocationStamp = nabto_stream_stamp_infinite();
     stream->recvSegmentAllocationStamp = nabto_stream_stamp_infinite();
 
     nabto_stream_init_send_segment(&stream->finSegment);
     nabto_stream_congestion_control_init(stream);
+}
 
+void nabto_stream_init_initiator(struct nabto_stream* stream) {
+    // the initiator shall not validate a nonce.
+    stream->nonceValidated = true;
+}
+
+void nabto_stream_init_responder(struct nabto_stream* stream, uint8_t nonce[8])
+{
+    stream->nonceValidated = false;
+    memcpy(stream->nonce, nonce, NABTO_STREAM_NONCE_SIZE);
 }
 
 void nabto_stream_destroy(struct nabto_stream* stream)
@@ -493,7 +506,7 @@ struct nabto_stream_send_segment* nabto_stream_handle_ack_iterator(struct nabto_
     if (stream->unacked == stream->unacked->nextUnacked &&
         stream->sendList == stream->sendList->nextSend)
     {
-        if ((stream->state == ST_FIN_WAIT_1 || stream->state == ST_LAST_ACK) &&
+        if ((stream->state == ST_FIN_WAIT_1 || stream->state == ST_LAST_ACK || stream->state == ST_CLOSING) &&
             stream->finSegment.state == B_IDLE)
         {
             nabto_stream_add_fin_segment_to_send_lists(stream);
@@ -652,6 +665,12 @@ void nabto_stream_handle_syn(struct nabto_stream* stream, struct nabto_stream_he
         stream->recvMaxAllocated = req->seq;
         stream->recvTop = req->seq;
         stream->timestampToEcho = hdr->timestampValue;
+        if (!stream->disableReplayProtection) {
+            if (!req->hasNonceCapability) {
+                stream->disableReplayProtection = true;
+            }
+        }
+
     } else if (stream->state == ST_WAIT_ACCEPT) {
         // do nothing, wait for the user to accept the stream.
     } else if (stream->state == ST_SYN_RCVD) {
@@ -662,6 +681,17 @@ void nabto_stream_handle_syn(struct nabto_stream* stream, struct nabto_stream_he
 
 void nabto_stream_handle_syn_ack(struct nabto_stream* stream, struct nabto_stream_header* hdr, struct nabto_stream_syn_ack_request* req)
 {
+    if (!stream->disableReplayProtection) {
+        if (!req->hasNonce) {
+            // this is only relevant for testing purposes such that it can be
+            // testet that both ends agreed on whether replay protection was
+            // used or not.
+            stream->disableReplayProtection = true;
+        } else {
+            stream->sendNonce = true;
+            memcpy(stream->nonce, req->nonce, NABTO_STREAM_NONCE_SIZE);
+        }
+    }
     // syn ack is only possible if we have sent a syn first
     if (stream->state == ST_SYN_SENT) {
         // answer on our syn

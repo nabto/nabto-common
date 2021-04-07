@@ -43,6 +43,15 @@ static const uint8_t* nabto_stream_read_uint32(const uint8_t* ptr, const uint8_t
     return ptr + 4;
 }
 
+static const uint8_t* nabto_stream_read_nonce(const uint8_t* ptr, const uint8_t* end, uint8_t* nonce)
+{
+    if (ptr == NULL || (ptr + NABTO_STREAM_NONCE_SIZE) > end) {
+        return NULL;
+    }
+    memcpy(nonce, ptr, NABTO_STREAM_NONCE_SIZE);
+    return ptr + 8;
+}
+
 static uint8_t* nabto_stream_write_uint8(uint8_t* ptr, const uint8_t* end, uint8_t val)
 {
     if (ptr == NULL || (ptr + 1) > end) {
@@ -72,6 +81,15 @@ static uint8_t* nabto_stream_write_uint32(uint8_t* ptr, const uint8_t* end, uint
     ptr[2] = (uint8_t)(val >> 8);
     ptr[3] = (uint8_t)val;
     return ptr + 4;
+}
+
+static uint8_t* nabto_stream_write_nonce(uint8_t* ptr, const uint8_t* end, uint8_t* nonce)
+{
+    if (ptr == NULL || (ptr + 8) > end) {
+        return NULL;
+    }
+    memcpy(ptr, nonce, 8);
+    return ptr + 8;
 }
 
 static uint8_t* nabto_stream_encode_buffer(uint8_t* ptr, const uint8_t* end, const uint8_t* buffer, size_t bufferSize)
@@ -143,6 +161,9 @@ void nabto_stream_parse_syn(struct nabto_stream* stream, const uint8_t* ptr, con
             const uint8_t* extPtr = ptr;
             extPtr = nabto_stream_read_uint32(extPtr, end, &req.seq);
             hasSeq = true;
+        } else if (type == NABTO_STREAM_EXTENSION_NONCE_CAPABILITY) {
+            const uint8_t* extPtr = ptr;
+            req.hasNonceCapability = true;
         }
 
         ptr += length;
@@ -185,8 +206,11 @@ void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr,
             const uint8_t* extPtr = ptr;
             extPtr = nabto_stream_read_uint32(extPtr, end, &req.seq);
             hasSeq = true;
+        } else if (type == NABTO_STREAM_EXTENSION_NONCE) {
+            const uint8_t* extPtr = ptr;
+            req.hasNonce = true;
+            extPtr = nabto_stream_read_nonce(extPtr, end, req.nonce);
         }
-
         ptr += length;
     } while (ptr < end);
 
@@ -196,6 +220,37 @@ void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr,
     }
 
     nabto_stream_handle_syn_ack(stream, hdr, &req);
+}
+
+/**
+ * loop through all extensions, try to find a nonce_response and validate the nonce.
+ */
+void nabto_stream_parse_nonce_response(struct nabto_stream* stream, const uint8_t* ptr, const uint8_t* end, struct nabto_stream_header* hdr)
+{
+    do {
+        uint16_t type;
+        uint16_t length;
+        ptr = nabto_stream_read_uint16(ptr, end, &type);
+        ptr = nabto_stream_read_uint16(ptr, end, &length);
+        if (ptr == NULL || length > (end - ptr)) {
+            break;
+        }
+
+        if (type == NABTO_STREAM_EXTENSION_NONCE_RESPONSE) {
+            const uint8_t* extPtr = ptr;
+            const uint8_t* extEnd = extPtr + length;
+            uint8_t nonce[8];
+            extPtr = nabto_stream_read_nonce(extPtr, extEnd, nonce);
+            if (extPtr != NULL) {
+                if (memcmp(nonce, stream->nonce, 8) == 0) {
+                    stream->nonceValidated = true;
+                }
+            }
+
+        }
+
+        ptr += length;
+    } while (ptr < end);
 }
 
 void nabto_stream_parse_acking(struct nabto_stream* stream, const uint8_t* ptr, const uint8_t* end, struct nabto_stream_header* hdr)
@@ -333,6 +388,19 @@ struct nabto_stream_send_segment* nabto_stream_nack_block(struct nabto_stream* s
 
 void nabto_stream_parse_ack(struct nabto_stream* stream, const uint8_t* ptr, const uint8_t* end, struct nabto_stream_header* hdr)
 {
+    if (!stream->disableReplayProtection) {
+        if (!stream->nonceValidated) {
+            nabto_stream_parse_nonce_response(stream, ptr, end, hdr);
+        }
+    }
+
+    if (!stream->disableReplayProtection) {
+        if (!stream->nonceValidated) {
+            // the first ack we receive as a responder needs to contain a valid nonce. If replay protection is enabled.
+            return;
+        }
+    }
+
     nabto_stream_parse_acking(stream, ptr, end, hdr);
 
     do {
@@ -348,6 +416,8 @@ void nabto_stream_parse_ack(struct nabto_stream* stream, const uint8_t* ptr, con
             nabto_stream_parse_data_extension(stream, ptr, length);
         } else if (type == NABTO_STREAM_EXTENSION_FIN) {
             nabto_stream_parse_fin_extension(stream, ptr, length);
+        } else if (type == NABTO_STREAM_EXTENSION_NONCE_RESPONSE) {
+            // TODO handle nonce response.
         } else {
             // unknown extension
         }
@@ -442,6 +512,12 @@ size_t nabto_stream_create_syn_packet(struct nabto_stream* stream, uint8_t* buff
     ptr = nabto_stream_write_uint16(ptr, end, 4);
     ptr = nabto_stream_write_uint32(ptr, end, stream->contentType);
 
+    // write nonce
+    if (!stream->disableReplayProtection) {
+        ptr = nabto_stream_write_uint16(ptr, end, NABTO_STREAM_EXTENSION_NONCE_CAPABILITY);
+        ptr = nabto_stream_write_uint16(ptr, end, 0);
+    }
+
     if (ptr == NULL) {
         return 0;
     }
@@ -474,6 +550,12 @@ size_t nabto_stream_create_syn_ack_packet(struct nabto_stream* stream, uint8_t* 
     ptr = nabto_stream_write_uint16(ptr, end, 4);
     ptr = nabto_stream_write_uint16(ptr, end, stream->maxSendSegmentSize);
     ptr = nabto_stream_write_uint16(ptr, end, stream->maxRecvSegmentSize);
+
+    if (!stream->disableReplayProtection) {
+        ptr = nabto_stream_write_uint16(ptr, end, NABTO_STREAM_EXTENSION_NONCE);
+        ptr = nabto_stream_write_uint16(ptr, end, 8);
+        ptr = nabto_stream_write_nonce(ptr, end, stream->nonce);
+    }
 
     if (ptr == NULL) {
         return 0;
@@ -514,6 +596,11 @@ size_t nabto_stream_create_ack_packet(struct nabto_stream* stream, uint8_t* buff
 
     if (ptr == NULL) {
         return 0;
+    }
+
+    if (stream->sendNonce) {
+        ptr = nabto_stream_add_nonce_response_extension(stream, ptr, end);
+        stream->sendNonce = false;
     }
 
     // add ack data.
@@ -572,6 +659,13 @@ uint8_t* nabto_stream_write_data_to_packet(struct nabto_stream* stream, uint8_t*
         nabto_stream_add_segment_to_unacked_list_before_elm(stream, stream->unacked, current);
     }
     return ptr;
+}
+
+uint8_t* nabto_stream_add_nonce_response_extension(struct nabto_stream* stream, uint8_t* ptr, const uint8_t* end)
+{
+    ptr = nabto_stream_write_uint16(ptr, end, NABTO_STREAM_EXTENSION_NONCE_RESPONSE);
+    ptr = nabto_stream_write_uint16(ptr, end, 8);
+    ptr = nabto_stream_write_nonce(ptr, end, stream->nonce);
 }
 
 struct gapBlock {
@@ -754,6 +848,12 @@ void nabto_stream_dump_packet(struct nabto_stream* stream, const uint8_t* buffer
             uint32_t synSeq = 0;
             extPtr = nabto_stream_read_uint32(extPtr, extEnd, &synSeq);
             NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Syn sequence number: %" NN_LOG_PRIu32, synSeq);
+        } else if (extensionType == NABTO_STREAM_EXTENSION_NONCE_CAPABILITY) {
+            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Nonce Capability extension");
+        } else if (extensionType == NABTO_STREAM_EXTENSION_NONCE) {
+            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Nonce extension");
+        } else if (extensionType == NABTO_STREAM_EXTENSION_NONCE_RESPONSE) {
+            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Nonce Response extension");
         } else {
             NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Unknown extension type: %" NN_LOG_PRIu16 ", length: %" NN_LOG_PRIu16, extensionType, length);
         }

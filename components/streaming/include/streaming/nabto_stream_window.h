@@ -43,27 +43,11 @@ enum {
     NABTO_STREAM_MAX_SEND_LIST_SIZE = 100
 };
 
-struct nabto_stream_syn_extra_data {
-    uint8_t* data;
-    size_t dataLength;
-};
-
-struct nabto_stream_syn_req {
-    uint32_t ackSeq;
-    uint16_t sendChunkSize;
-    uint16_t recvChunkSize;
-    uint32_t initialRecvWindowSize;
-    uint32_t payloadPrototolIdentifier;
-    struct nabto_stream_syn_extra_data extraData;
-};
-
-
 enum nabto_stream_timestamp_type {
     NABTO_STREAM_STAMP_NOW, // timestamp is timed out now.
     NABTO_STREAM_STAMP_INFINITE, // timestamp is infinite in the future
     NABTO_STREAM_STAMP_FUTURE
 };
-
 
 typedef struct {
     enum nabto_stream_timestamp_type type;
@@ -80,12 +64,15 @@ struct nabto_stream_syn_request {
     uint32_t contentType;
     uint16_t maxSendSegmentSize;
     uint16_t maxRecvSegmentSize;
+    bool hasNonceCapability;
 };
 
 struct nabto_stream_syn_ack_request {
     uint32_t seq;
     uint16_t maxSendSegmentSize;
     uint16_t maxRecvSegmentSize;
+    bool hasNonce;
+    uint8_t nonce[NABTO_STREAM_NONCE_SIZE];
 };
 
 enum nabto_stream_next_event_type {
@@ -436,6 +423,29 @@ struct nabto_stream {
     uint32_t reorderedOrLostPackets;
     uint32_t timeouts;
     nabto_stream_stamp streamStart;
+
+    // replay protection
+    /**
+     * Disable stream replay protection. This is set to true when one ends
+     * learns that replay protection should not be used. This can also be set
+     * for testing purposes before the stream is started.
+     */
+    bool disableReplayProtection;
+
+    /**
+     * If this is a responder the nonce is set on creationg, if it is the initiator it is used to store the nonce response.
+     */
+    uint8_t nonce[NABTO_STREAM_NONCE_SIZE];
+    /**
+     * Set to true if a syn|ack with a nonce is received, a nonce is sent/resent in the next ack.
+     */
+    bool sendNonce;
+    /**
+     * set to true when the nonce has been validated. The initiator sets this to
+     * true when the stream is created. The responder sets this to true when the
+     * nonce has been validated.
+     */
+    bool nonceValidated;
 };
 
 /******************************************************************************/
@@ -489,6 +499,8 @@ void nabto_stream_stats_observe(struct nabto_stats* stat, double value);
 uint32_t nabto_stream_get_duration(struct nabto_stream * stream);
 
 void nabto_stream_init(struct nabto_stream* stream, struct nabto_stream_module* module, void* moduleUserData);
+void nabto_stream_init_initiator(struct nabto_stream* stream);
+void nabto_stream_init_responder(struct nabto_stream* stream, uint8_t nonce[8]);
 void nabto_stream_destroy(struct nabto_stream* stream);
 
 void nabto_stream_segment_has_been_acked(struct nabto_stream* stream, struct nabto_stream_send_segment* segment);

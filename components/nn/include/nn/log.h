@@ -11,6 +11,7 @@ extern "C" {
 #define NN_LOG_PRIu8  PRIu8
 #define NN_LOG_PRIu16 PRIu16
 #define NN_LOG_PRIu32 PRIu32
+#define NN_LOG_PRIu64 PRIu64
 #define NN_LOG_PRIsize "zu"
 
 

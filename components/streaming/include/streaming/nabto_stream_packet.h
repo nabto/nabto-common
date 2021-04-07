@@ -38,6 +38,7 @@ size_t nabto_stream_create_syn_packet(struct nabto_stream* stream, uint8_t* buff
 size_t nabto_stream_create_syn_ack_packet(struct nabto_stream* stream, uint8_t* buffer, size_t bufferSize);
 size_t nabto_stream_create_ack_packet(struct nabto_stream* stream, uint8_t* buffer, size_t bufferSize);
 uint8_t* nabto_stream_add_ack_extension(struct nabto_stream* stream, uint8_t* ptr, const uint8_t* end);
+uint8_t* nabto_stream_add_nonce_response_extension(struct nabto_stream* stream, uint8_t* ptr, const uint8_t* end);
 size_t nabto_stream_create_rst_packet(uint8_t* buffer, size_t bufferSize);
 
 void nabto_stream_dump_packet(struct nabto_stream* stream, const uint8_t* buffer, size_t bufferSize, const char* extraDescription);
