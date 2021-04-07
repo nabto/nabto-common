@@ -13,6 +13,7 @@
 
 #include "nabto_stream_config.h"
 #include "nabto_stream_types.h"
+#include "nabto_stream_protocol.h"
 
 
 #include <stddef.h>
