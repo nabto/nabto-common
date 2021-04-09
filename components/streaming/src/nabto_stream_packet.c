@@ -162,7 +162,6 @@ void nabto_stream_parse_syn(struct nabto_stream* stream, const uint8_t* ptr, con
             extPtr = nabto_stream_read_uint32(extPtr, end, &req.seq);
             hasSeq = true;
         } else if (type == NABTO_STREAM_EXTENSION_NONCE_CAPABILITY) {
-            const uint8_t* extPtr = ptr;
             req.hasNonceCapability = true;
         }
 
@@ -664,8 +663,9 @@ uint8_t* nabto_stream_write_data_to_packet(struct nabto_stream* stream, uint8_t*
 uint8_t* nabto_stream_add_nonce_response_extension(struct nabto_stream* stream, uint8_t* ptr, const uint8_t* end)
 {
     ptr = nabto_stream_write_uint16(ptr, end, NABTO_STREAM_EXTENSION_NONCE_RESPONSE);
-    ptr = nabto_stream_write_uint16(ptr, end, 8);
+    ptr = nabto_stream_write_uint16(ptr, end, NABTO_STREAM_NONCE_SIZE);
     ptr = nabto_stream_write_nonce(ptr, end, stream->nonce);
+    return ptr;
 }
 
 struct gapBlock {
