@@ -139,6 +139,7 @@ void nabto_stream_parse_syn(struct nabto_stream* stream, const uint8_t* ptr, con
     req.contentType = 0;
     req.maxSendSegmentSize = NABTO_STREAM_DEFAULT_MAX_SEND_SEGMENT_SIZE;
     req.maxRecvSegmentSize = NABTO_STREAM_DEFAULT_MAX_RECV_SEGMENT_SIZE;
+    req.hasNonceCapability = false;
 
     bool hasSeq = false;
 
@@ -181,9 +182,11 @@ void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr,
     struct nabto_stream_syn_ack_request req;
     req.maxSendSegmentSize = NABTO_STREAM_DEFAULT_MAX_SEND_SEGMENT_SIZE;
     req.maxRecvSegmentSize = NABTO_STREAM_DEFAULT_MAX_RECV_SEGMENT_SIZE;
+    req.hasNonce = false;
 
     bool hasSegmentSizes = false;
     bool hasSeq = false;
+
 
     do {
         uint16_t type;
@@ -241,7 +244,7 @@ void nabto_stream_parse_nonce_response(struct nabto_stream* stream, const uint8_
             uint8_t nonce[8];
             extPtr = nabto_stream_read_nonce(extPtr, extEnd, nonce);
             if (extPtr != NULL) {
-                if (memcmp(nonce, stream->nonce, 8) == 0) {
+                if (memcmp(nonce, stream->nonce, NABTO_STREAM_NONCE_SIZE) == 0) {
                     stream->nonceValidated = true;
                 }
             }
