@@ -554,7 +554,7 @@ void nabto_stream_handle_rst(struct nabto_stream* stream)
     if (state >= ST_CLOSED) {
         return;
     }
-    if (state == ST_LAST_ACK &&
+    if ((state == ST_LAST_ACK || state == ST_CLOSING) &&
         ((stream->unacked == stream->unacked->nextUnacked &&
           stream->sendList == stream->sendList->nextSend) ||
          stream->unacked->nextUnacked == &stream->finSegment))
