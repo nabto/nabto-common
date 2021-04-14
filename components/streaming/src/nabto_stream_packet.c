@@ -418,8 +418,6 @@ void nabto_stream_parse_ack(struct nabto_stream* stream, const uint8_t* ptr, con
             nabto_stream_parse_data_extension(stream, ptr, length);
         } else if (type == NABTO_STREAM_EXTENSION_FIN) {
             nabto_stream_parse_fin_extension(stream, ptr, length);
-        } else if (type == NABTO_STREAM_EXTENSION_NONCE_RESPONSE) {
-            // TODO handle nonce response.
         } else {
             // unknown extension
         }
