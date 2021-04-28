@@ -5,26 +5,13 @@
 
 const char* unhandledRequest = "Request unhandled";
 
-nabto_coap_error nabto_coap_server_init(struct nabto_coap_server* server, nabto_coap_get_stamp getStamp, nabto_coap_notify_event notifyEvent, void* userData)
+nabto_coap_error nabto_coap_server_init(struct nabto_coap_server* server)
 {
     memset(server, 0, sizeof(struct nabto_coap_server));
-    server->getStamp = getStamp;
-    server->notifyEvent = notifyEvent;
-    server->userData = userData;
     server->ackTimeout = NABTO_COAP_ACK_TIMEOUT;
-    server->maxRequests = SIZE_MAX;
-
-    // init requests list
-    server->requestsSentinel = calloc(1, sizeof(struct nabto_coap_server_request));
-    if (server->requestsSentinel == NULL) {
-        return NABTO_COAP_ERROR_OUT_OF_MEMORY;
-    }
-    server->requestsSentinel->next = server->requestsSentinel;
-    server->requestsSentinel->prev = server->requestsSentinel;
 
     server->root = nabto_coap_router_node_new();
     if (server->root == NULL) {
-        free(server->requestsSentinel);
         return NABTO_COAP_ERROR_OUT_OF_MEMORY;
     }
     return NABTO_COAP_ERROR_OK;
@@ -32,22 +19,46 @@ nabto_coap_error nabto_coap_server_init(struct nabto_coap_server* server, nabto_
 
 void nabto_coap_server_destroy(struct nabto_coap_server* server)
 {
-    struct nabto_coap_server_request* iterator = server->requestsSentinel->next;
-    while(iterator != server->requestsSentinel) {
+    nabto_coap_router_node_free(server->root);
+}
+
+nabto_coap_error nabto_coap_server_requests_init(struct nabto_coap_server_requests* requests, struct nabto_coap_server* server, nabto_coap_get_stamp getStamp, nabto_coap_notify_event notifyEvent, void* userData)
+{
+    memset(requests, 0, sizeof(struct nabto_coap_server_requests));
+    requests->server = server;
+    requests->getStamp = getStamp;
+    requests->notifyEvent = notifyEvent;
+    requests->userData = userData;
+    requests->maxRequests = SIZE_MAX;
+
+    // init requests list
+    requests->requestsSentinel = calloc(1, sizeof(struct nabto_coap_server_request));
+    if (requests->requestsSentinel == NULL) {
+        return NABTO_COAP_ERROR_OUT_OF_MEMORY;
+    }
+    requests->requestsSentinel->next = requests->requestsSentinel;
+    requests->requestsSentinel->prev = requests->requestsSentinel;
+
+    return NABTO_COAP_ERROR_OK;
+}
+
+void nabto_coap_server_requests_destroy(struct nabto_coap_server_requests* requests)
+{
+    struct nabto_coap_server_request* iterator = requests->requestsSentinel->next;
+    while(iterator != requests->requestsSentinel) {
         struct nabto_coap_server_request* current = iterator;
         iterator = iterator->next;
         current->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
         nabto_coap_server_free_request(current);
     }
-    free(server->requestsSentinel);
+    free(requests->requestsSentinel);
 
-    nabto_coap_router_node_free(server->root);
-    server->requestsSentinel = NULL;
+    requests->requestsSentinel = NULL;
 }
 
-void nabto_coap_server_limit_requests(struct nabto_coap_server* server, size_t limit)
+void nabto_coap_server_limit_requests(struct nabto_coap_server_requests* requests, size_t limit)
 {
-    server->maxRequests = limit;
+    requests->maxRequests = limit;
 }
 
 
@@ -92,11 +103,11 @@ void nabto_coap_server_remove_request_from_list(struct nabto_coap_server_request
     request->next = request;
 }
 
-void nabto_coap_server_handle_timeout(struct nabto_coap_server* server)
+void nabto_coap_server_handle_timeout(struct nabto_coap_server_requests* requests)
 {
-    uint32_t now = server->getStamp(server->userData);
-    struct nabto_coap_server_request* request = server->requestsSentinel->next;
-    while(request != server->requestsSentinel) {
+    uint32_t now = requests->getStamp(requests->userData);
+    struct nabto_coap_server_request* request = requests->requestsSentinel->next;
+    while(request != requests->requestsSentinel) {
         if (nabto_coap_is_stamp_less_equal(request->response.timeout, now))
         {
             if (request->response.retransmissions > NABTO_COAP_MAX_RETRANSMITS) {
@@ -113,15 +124,15 @@ void nabto_coap_server_handle_timeout(struct nabto_coap_server* server)
     }
 }
 
-enum nabto_coap_server_next_event nabto_coap_server_next_event(struct nabto_coap_server* server)
+enum nabto_coap_server_next_event nabto_coap_server_next_event(struct nabto_coap_server_requests* requests)
 {
-    if (server->errorConnection != NULL ||
-        server->ackConnection != NULL) {
+    if (requests->errorConnection != NULL ||
+        requests->ackConnection != NULL) {
         return NABTO_COAP_SERVER_NEXT_EVENT_SEND;
     }
 
-    struct nabto_coap_server_request* request = server->requestsSentinel->next;
-    while(request != server->requestsSentinel) {
+    struct nabto_coap_server_request* request = requests->requestsSentinel->next;
+    while(request != requests->requestsSentinel) {
         if ((request->state == NABTO_COAP_SERVER_REQUEST_STATE_REQUEST ||
              request->state == NABTO_COAP_SERVER_REQUEST_STATE_USER) &&
             request->hasBlock1Ack)
@@ -135,8 +146,8 @@ enum nabto_coap_server_next_event nabto_coap_server_next_event(struct nabto_coap
         request = request->next;
     }
 
-    request = server->requestsSentinel->next;
-    while(request != server->requestsSentinel) {
+    request = requests->requestsSentinel->next;
+    while(request != requests->requestsSentinel) {
         if (request->state == NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE) {
             // a response has a timeout.
             return NABTO_COAP_SERVER_NEXT_EVENT_WAIT;
@@ -147,11 +158,11 @@ enum nabto_coap_server_next_event nabto_coap_server_next_event(struct nabto_coap
     return NABTO_COAP_SERVER_NEXT_EVENT_NOTHING;
 }
 
-bool nabto_coap_server_get_next_timeout(struct nabto_coap_server* server, uint32_t* nextTimeout)
+bool nabto_coap_server_get_next_timeout(struct nabto_coap_server_requests* requests, uint32_t* nextTimeout)
 {
     bool first = true;
-    struct nabto_coap_server_request* request = server->requestsSentinel->next;
-    while(request != server->requestsSentinel) {
+    struct nabto_coap_server_request* request = requests->requestsSentinel->next;
+    while(request != requests->requestsSentinel) {
         if (request->state == NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE) {
             if (first) {
                 first = false;
@@ -166,18 +177,18 @@ bool nabto_coap_server_get_next_timeout(struct nabto_coap_server* server, uint32
 }
 
 
-void* nabto_coap_server_get_connection_send(struct nabto_coap_server* server)
+void* nabto_coap_server_get_connection_send(struct nabto_coap_server_requests* requests)
 {
-    if (server->errorConnection) {
-        return server->errorConnection;
+    if (requests->errorConnection) {
+        return requests->errorConnection;
     }
 
-    if (server->ackConnection) {
-        return server->ackConnection;
+    if (requests->ackConnection) {
+        return requests->ackConnection;
     }
 
-    struct nabto_coap_server_request* request = server->requestsSentinel->next;
-    while(request != server->requestsSentinel) {
+    struct nabto_coap_server_request* request = requests->requestsSentinel->next;
+    while(request != requests->requestsSentinel) {
         if ((request->state == NABTO_COAP_SERVER_REQUEST_STATE_REQUEST ||
              request->state == NABTO_COAP_SERVER_REQUEST_STATE_USER) &&
             request->hasBlock1Ack)
@@ -193,7 +204,7 @@ void* nabto_coap_server_get_connection_send(struct nabto_coap_server* server)
     return NULL;
 }
 
-uint8_t* nabto_coap_server_send_ack(struct nabto_coap_server* server, uint8_t* buffer, uint8_t* end)
+uint8_t* nabto_coap_server_send_ack(struct nabto_coap_server_requests* requests, uint8_t* buffer, uint8_t* end)
 {
     uint8_t* ptr = buffer;
 
@@ -201,40 +212,40 @@ uint8_t* nabto_coap_server_send_ack(struct nabto_coap_server* server, uint8_t* b
     memset(&header, 0, sizeof(struct nabto_coap_message_header));
     header.type = NABTO_COAP_TYPE_ACK;
     header.code = NABTO_COAP_CODE_EMPTY;
-    header.messageId = server->ackMessageId;
+    header.messageId = requests->ackMessageId;
 
     ptr = nabto_coap_encode_header(&header, ptr, end);
 
-    server->ackConnection = NULL;
+    requests->ackConnection = NULL;
 
     return ptr;
 }
 
-uint8_t* nabto_coap_server_send_error(struct nabto_coap_server* server, uint8_t* buffer, uint8_t* end)
+uint8_t* nabto_coap_server_send_error(struct nabto_coap_server_requests* requests, uint8_t* buffer, uint8_t* end)
 {
     uint8_t* ptr = buffer;
 
     struct nabto_coap_message_header header;
     memset(&header, 0, sizeof(struct nabto_coap_message_header));
     header.type = NABTO_COAP_TYPE_NON;
-    header.code = (nabto_coap_code)server->errorCode;
-    header.messageId = server->errorMessageId;
-    header.token = server->errorToken;
+    header.code = (nabto_coap_code)requests->errorCode;
+    header.messageId = requests->errorMessageId;
+    header.token = requests->errorToken;
 
     ptr = nabto_coap_encode_header(&header, ptr, end);
 
-    ptr = nabto_coap_encode_payload(server->errorPayload, server->errorPayloadLength, ptr, end);
+    ptr = nabto_coap_encode_payload(requests->errorPayload, requests->errorPayloadLength, ptr, end);
 
-    server->errorConnection = NULL;
-    server->errorCode = 0;
-    server->errorMessageId = 0;
-    server->errorPayload = NULL;
-    server->errorPayloadLength = 0;
+    requests->errorConnection = NULL;
+    requests->errorCode = 0;
+    requests->errorMessageId = 0;
+    requests->errorPayload = NULL;
+    requests->errorPayloadLength = 0;
     return ptr;
 }
 
 
-static uint8_t* nabto_coap_server_send_in_request_state(struct nabto_coap_server* server, struct nabto_coap_server_request* request, uint8_t* buffer, uint8_t* end)
+static uint8_t* nabto_coap_server_send_in_request_state(struct nabto_coap_server_requests* requests, struct nabto_coap_server_request* request, uint8_t* buffer, uint8_t* end)
 {
     uint8_t* ptr = buffer;
     struct nabto_coap_message_header header;
@@ -257,7 +268,7 @@ static uint8_t* nabto_coap_server_send_in_request_state(struct nabto_coap_server
     return NULL;
 }
 
-static uint8_t* nabto_coap_server_send_in_response_state(struct nabto_coap_server* server, struct nabto_coap_server_request* request, uint8_t* buffer, uint8_t* end)
+static uint8_t* nabto_coap_server_send_in_response_state(struct nabto_coap_server_requests* requests, struct nabto_coap_server_request* request, uint8_t* buffer, uint8_t* end)
 {
     uint8_t* ptr = buffer;
     struct nabto_coap_server_response* response = &request->response;
@@ -310,12 +321,12 @@ static uint8_t* nabto_coap_server_send_in_response_state(struct nabto_coap_serve
     if (request->type == NABTO_COAP_TYPE_NON) {
         // NONs should not be retransmitted let it expire asap
         response->retransmissions += NABTO_COAP_MAX_RETRANSMITS + 2; // large enough to expire
-        response->timeout = nabto_coap_server_stamp_now(server);
+        response->timeout = nabto_coap_server_stamp_now(requests);
         response->sendNow = false;
     } else {
         response->sendNow = false;
-        response->timeout = nabto_coap_server_stamp_now(server);
-        response->timeout += (server->ackTimeout) << response->retransmissions;
+        response->timeout = nabto_coap_server_stamp_now(requests);
+        response->timeout += (requests->server->ackTimeout) << response->retransmissions;
         response->retransmissions += 1;
     }
 
@@ -323,27 +334,27 @@ static uint8_t* nabto_coap_server_send_in_response_state(struct nabto_coap_serve
 }
 
 
-uint8_t* nabto_coap_server_handle_send(struct nabto_coap_server* server, uint8_t* buffer, uint8_t* end)
+uint8_t* nabto_coap_server_handle_send(struct nabto_coap_server_requests* requests, uint8_t* buffer, uint8_t* end)
 {
-    if (server->errorConnection) {
-        return nabto_coap_server_send_error(server, buffer, end);
+    if (requests->errorConnection) {
+        return nabto_coap_server_send_error(requests, buffer, end);
     }
 
-    if (server->ackConnection) {
-        return nabto_coap_server_send_ack(server, buffer, end);
+    if (requests->ackConnection) {
+        return nabto_coap_server_send_ack(requests, buffer, end);
     }
 
-    struct nabto_coap_server_request* request = server->requestsSentinel->next;
-    while(request != server->requestsSentinel) {
+    struct nabto_coap_server_request* request = requests->requestsSentinel->next;
+    while(request != requests->requestsSentinel) {
         if ((request->state == NABTO_COAP_SERVER_REQUEST_STATE_REQUEST ||
              request->state == NABTO_COAP_SERVER_REQUEST_STATE_USER) &&
             request->hasBlock1Ack)
         {
-            return nabto_coap_server_send_in_request_state(server, request, buffer, end);
+            return nabto_coap_server_send_in_request_state(requests, request, buffer, end);
         } else if (request->state == NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE &&
                    request->response.sendNow)
         {
-            return nabto_coap_server_send_in_response_state(server, request, buffer, end);
+            return nabto_coap_server_send_in_response_state(requests, request, buffer, end);
         }
         request = request->next;
     }
@@ -353,7 +364,7 @@ uint8_t* nabto_coap_server_handle_send(struct nabto_coap_server* server, uint8_t
 
 void nabto_coap_server_free_request(struct nabto_coap_server_request* request)
 {
-    struct nabto_coap_server* server = request->server;
+    struct nabto_coap_server_requests* requests = request->requests;
     if (!request->isFreed || request->state != NABTO_COAP_SERVER_REQUEST_STATE_DONE) {
         // dont free before user frees and server is done
         return;
@@ -379,12 +390,12 @@ void nabto_coap_server_free_request(struct nabto_coap_server_request* request)
 
     free(request);
 
-    server->activeRequests--;
+    requests->activeRequests--;
 }
 
-uint32_t nabto_coap_server_stamp_now(struct nabto_coap_server* server)
+uint32_t nabto_coap_server_stamp_now(struct nabto_coap_server_requests* requests)
 {
-    return server->getStamp(server->userData);
+    return requests->getStamp(requests->userData);
 }
 
 void nabto_coap_server_remove_resource(struct nabto_coap_server_resource* resource)
@@ -552,7 +563,7 @@ nabto_coap_error nabto_coap_server_response_ready(struct nabto_coap_server_reque
     } else {
         request->state = NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE;
         request->response.sendNow = true;
-        request->server->notifyEvent(request->server->userData);
+        request->requests->notifyEvent(request->requests->userData);
         return NABTO_COAP_ERROR_OK;
     }
 }
@@ -589,14 +600,14 @@ const char* nabto_coap_server_request_get_parameter(struct nabto_coap_server_req
     return NULL;
 }
 
-void nabto_coap_server_remove_connection(struct nabto_coap_server* server, void* connection)
+void nabto_coap_server_remove_connection(struct nabto_coap_server_requests* requests, void* connection)
 {
     // Loop over all requests terminate all request where the
     // connection is dead. Or mark them as connection dead so they
     // will die when the user code resolves the request.
 
-    struct nabto_coap_server_request* it = server->requestsSentinel->next;
-    while(it != server->requestsSentinel) {
+    struct nabto_coap_server_request* it = requests->requestsSentinel->next;
+    while(it != requests->requestsSentinel) {
         struct nabto_coap_server_request* current = it;
         it = it->next;
 
@@ -614,19 +625,19 @@ void nabto_coap_server_remove_connection(struct nabto_coap_server* server, void*
             }
         }
     }
-    if (server->ackConnection == connection) {
-        server->ackConnection = NULL;
+    if (requests->ackConnection == connection) {
+        requests->ackConnection = NULL;
     }
 
-    if (server->errorConnection == connection) {
-        server->errorConnection = NULL;
+    if (requests->errorConnection == connection) {
+        requests->errorConnection = NULL;
     }
 }
 
-uint16_t nabto_coap_server_next_message_id(struct nabto_coap_server* server)
+uint16_t nabto_coap_server_next_message_id(struct nabto_coap_server_requests* requests)
 {
-    server->messageId++;
-    return server->messageId;
+    requests->messageId++;
+    return requests->messageId;
 }
 
 struct nabto_coap_router_node* nabto_coap_router_node_new()

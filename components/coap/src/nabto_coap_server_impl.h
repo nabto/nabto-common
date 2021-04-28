@@ -28,7 +28,6 @@ struct nabto_coap_server_request_parameter {
 struct nabto_coap_server_request;
 
 struct nabto_coap_server_response {
-    struct nabto_coap_server* server;
     struct nabto_coap_server_request* request;
     bool sendNow;
     uint8_t retransmissions;
@@ -49,7 +48,7 @@ struct nabto_coap_server_response {
 };
 
 struct nabto_coap_server_request {
-    struct nabto_coap_server* server;
+    struct nabto_coap_server_requests* requests;
     struct nabto_coap_server_request* next;
     struct nabto_coap_server_request* prev;
     struct nabto_coap_server_resource_handler* handler;
@@ -111,16 +110,16 @@ struct nabto_coap_router_node {
 
 void nabto_coap_server_insert_request_into_list(struct nabto_coap_server_request* e1, struct nabto_coap_server_request* request);
 
-struct nabto_coap_server_request* nabto_coap_server_find_request(struct nabto_coap_server* server, nabto_coap_token* token, void* conneciton);
+struct nabto_coap_server_request* nabto_coap_server_find_request(struct nabto_coap_server_requests* requests, nabto_coap_token* token, void* conneciton);
 
-struct nabto_coap_server_response* nabto_coap_server_find_response(struct nabto_coap_server* server, uint16_t messageId, void* conneciton);
+struct nabto_coap_server_response* nabto_coap_server_find_response(struct nabto_coap_server_requests* requests, uint16_t messageId, void* conneciton);
 
 bool nabto_coap_server_match_resource(struct nabto_coap_server_resource* resource, uint8_t* options);
 
 void nabto_coap_server_free_request(struct nabto_coap_server_request* request);
 
 
-uint16_t nabto_coap_server_next_message_id(struct nabto_coap_server* server);
+uint16_t nabto_coap_server_next_message_id(struct nabto_coap_server_requests* requests);
 
 struct nabto_coap_router_node* nabto_coap_router_node_new();
 void nabto_coap_router_node_free(struct nabto_coap_router_node* node);

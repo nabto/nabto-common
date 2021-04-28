@@ -26,16 +26,27 @@ struct nabto_coap_server_response;
 struct nabto_coap_server_resource;
 
 struct nabto_coap_server {
-    struct nabto_coap_server_request* requestsSentinel;
     struct nabto_coap_router_node* root;
+    uint32_t ackTimeout;
+};
+
+/**
+ * For each server there can be several request contexts. Each requests context
+ * handles all the retransmissions etc for the group of requests. On some
+ * systems it can be beneficial to have a requests context pr connection.
+ */
+struct nabto_coap_server_requests {
+    struct nabto_coap_server* server;
+    struct nabto_coap_server_request* requestsSentinel;
 
     nabto_coap_get_stamp getStamp;
     // notify implementation that an event has potentially occured.
     nabto_coap_notify_event notifyEvent;
 
+    // userData for getStamp and notifyEvent
     void* userData;
+
     uint16_t messageId;
-    uint32_t ackTimeout;
 
     // if we need to send an error back. If errorConnection is non
     // null we need to send an error back else there's no error to
@@ -52,14 +63,18 @@ struct nabto_coap_server {
 
     size_t maxRequests; // max concurrent requests
     size_t activeRequests;
-
 };
 
-nabto_coap_error nabto_coap_server_init(struct nabto_coap_server* server, nabto_coap_get_stamp getStamp, nabto_coap_notify_event notifyEvent, void* userData);
+nabto_coap_error nabto_coap_server_init(struct nabto_coap_server* server);
+
+nabto_coap_error nabto_coap_server_requests_init(struct nabto_coap_server_requests* requests, struct nabto_coap_server* server, nabto_coap_get_stamp getStamp, nabto_coap_notify_event notifyEvent, void* userData);
 
 void nabto_coap_server_destroy(struct nabto_coap_server* server);
 
-void nabto_coap_server_limit_requests(struct nabto_coap_server* server, size_t limit);
+void nabto_coap_server_requests_destroy(struct nabto_coap_server_requests* requests);
+
+
+void nabto_coap_server_limit_requests(struct nabto_coap_server_requests* requests, size_t limit);
 
 #define NABTO_COAP_SERVER_LOG_TRACE(fmt, args) do { printf(fmt, args); } while(0);
 
@@ -111,11 +126,11 @@ const char* nabto_coap_server_request_get_parameter(struct nabto_coap_server_req
 /**
  * handle packets and events
  */
-void nabto_coap_server_handle_packet(struct nabto_coap_server* server, void* connection, const uint8_t* packet, size_t packetSize);
+void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests, void* connection, const uint8_t* packet, size_t packetSize);
 
-void nabto_coap_server_remove_connection(struct nabto_coap_server* server, void* connection);
+void nabto_coap_server_remove_connection(struct nabto_coap_server_requests* requests, void* connection);
 
-enum nabto_coap_server_next_event nabto_coap_server_next_event(struct nabto_coap_server* server);
+enum nabto_coap_server_next_event nabto_coap_server_next_event(struct nabto_coap_server_requests* requests);
 
 /**
  * @return The ptr where bytes have been written till in the buffer.
@@ -124,16 +139,16 @@ enum nabto_coap_server_next_event nabto_coap_server_next_event(struct nabto_coap
  *   buffer. If non null is returned, the ptr is between buffer and
  *   end.
  */
-uint8_t* nabto_coap_server_handle_send(struct nabto_coap_server* server, uint8_t* buffer, uint8_t* end);
-void nabto_coap_server_handle_timeout(struct nabto_coap_server* server);
+uint8_t* nabto_coap_server_handle_send(struct nabto_coap_server_requests* requests, uint8_t* buffer, uint8_t* end);
+void nabto_coap_server_handle_timeout(struct nabto_coap_server_requests* requests);
 
-bool nabto_coap_server_get_next_timeout(struct nabto_coap_server* server, uint32_t* nextTimeout);
-int32_t nabto_coap_server_stamp_diff_now(struct nabto_coap_server* server, uint32_t stamp);
-uint32_t nabto_coap_server_stamp_now(struct nabto_coap_server* server);
+bool nabto_coap_server_get_next_timeout(struct nabto_coap_server_requests* requests, uint32_t* nextTimeout);
+int32_t nabto_coap_server_stamp_diff_now(struct nabto_coap_server_requests* requests, uint32_t stamp);
+uint32_t nabto_coap_server_stamp_now(struct nabto_coap_server_requests* requests);
 
 
 // get the connection the server wants to send data on.
-void* nabto_coap_server_get_connection_send(struct nabto_coap_server* server);
+void* nabto_coap_server_get_connection_send(struct nabto_coap_server_requests* requests);
 
 #ifdef __cplusplus
 } // extern "C"

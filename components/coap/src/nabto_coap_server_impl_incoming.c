@@ -11,25 +11,25 @@ static const char* outOfResources = "Out of resources";
 static const char* wrongPayloadLength = "Wrong payload length";
 
 
-static struct nabto_coap_server_request* nabto_coap_server_handle_new_request(struct nabto_coap_server* server, struct nabto_coap_incoming_message* message, void* connection);
-static void nabto_coap_server_handle_ack(struct nabto_coap_server* server, struct nabto_coap_server_request* request, struct nabto_coap_incoming_message* message);
-static void nabto_coap_server_handle_rst(struct nabto_coap_server* server, uint16_t messageId, void* connection);
-static struct nabto_coap_server_request* nabto_coap_server_request_new(struct nabto_coap_server* server);
+static struct nabto_coap_server_request* nabto_coap_server_handle_new_request(struct nabto_coap_server_requests* requests, struct nabto_coap_incoming_message* message, void* connection);
+static void nabto_coap_server_handle_ack(struct nabto_coap_server_requests* requests, struct nabto_coap_server_request* request, struct nabto_coap_incoming_message* message);
+static void nabto_coap_server_handle_rst(struct nabto_coap_server_requests* requests, uint16_t messageId, void* connection);
+static struct nabto_coap_server_request* nabto_coap_server_request_new(struct nabto_coap_server_requests* requests);
 static struct nabto_coap_server_resource* nabto_coap_server_find_resource(struct nabto_coap_server* server, struct nabto_coap_incoming_message* message, struct nabto_coap_server_request_parameter* parameters);
 
 static bool nabto_coap_server_validate_critical_options(struct nabto_coap_incoming_message* message);
 
-static void nabto_coap_server_handle_data_for_response(struct nabto_coap_server* server, struct nabto_coap_server_request* request, struct nabto_coap_incoming_message* message);
-static void nabto_coap_server_handle_data_for_request(struct nabto_coap_server* server, struct nabto_coap_server_request* request, struct nabto_coap_incoming_message* message);
+static void nabto_coap_server_handle_data_for_response(struct nabto_coap_server_requests* requests, struct nabto_coap_server_request* request, struct nabto_coap_incoming_message* message);
+static void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests* requests, struct nabto_coap_server_request* request, struct nabto_coap_incoming_message* message);
 
 /**
  * Make an error response to some condition
  * @param errorDescription  keep this pointer alive forever.
  */
-static void nabto_coap_server_make_error_response(struct nabto_coap_server* server, void* connection, struct nabto_coap_incoming_message* message, nabto_coap_code code, const char* errorDescription);
+static void nabto_coap_server_make_error_response(struct nabto_coap_server_requests* requests, void* connection, struct nabto_coap_incoming_message* message, nabto_coap_code code, const char* errorDescription);
 
 
-void nabto_coap_server_handle_packet(struct nabto_coap_server* server, void* connection, const uint8_t* packet, size_t packetSize)
+void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests, void* connection, const uint8_t* packet, size_t packetSize)
 {
     struct nabto_coap_incoming_message msg;
     if (!nabto_coap_parse_message(packet, packetSize, &msg)) {
@@ -43,26 +43,26 @@ void nabto_coap_server_handle_packet(struct nabto_coap_server* server, void* con
         msg.type == NABTO_COAP_TYPE_ACK)
     {
         if (!nabto_coap_server_validate_critical_options(&msg)) {
-            nabto_coap_server_make_error_response(server, connection, &msg, NABTO_COAP_CODE_BAD_REQUEST, unsupportedCriticalOption);
+            nabto_coap_server_make_error_response(requests, connection, &msg, NABTO_COAP_CODE_BAD_REQUEST, unsupportedCriticalOption);
             return;
         }
     }
 
-    struct nabto_coap_server_request* request = nabto_coap_server_find_request(server, &msg.token, connection);
+    struct nabto_coap_server_request* request = nabto_coap_server_find_request(requests, &msg.token, connection);
 
     if (msg.type == NABTO_COAP_TYPE_CON || msg.type == NABTO_COAP_TYPE_NON) {
 
         if (request && request->messageId == msg.messageId) {
             // retransmission of a request.
             if (msg.type == NABTO_COAP_TYPE_CON) {
-                server->ackConnection = connection;
-                server->ackMessageId = msg.messageId;
+                requests->ackConnection = connection;
+                requests->ackMessageId = msg.messageId;
             }
             return;
         }
 
         if (!request) {
-            request = nabto_coap_server_handle_new_request(server, &msg, connection);
+            request = nabto_coap_server_handle_new_request(requests, &msg, connection);
             if (!request) {
                 // error is handled inside the function.
                 return;
@@ -70,10 +70,10 @@ void nabto_coap_server_handle_packet(struct nabto_coap_server* server, void* con
         }
 
         if (request->state == NABTO_COAP_SERVER_REQUEST_STATE_REQUEST) {
-            nabto_coap_server_handle_data_for_request(server, request, &msg);
+            nabto_coap_server_handle_data_for_request(requests, request, &msg);
             return;
         } else if (request->state == NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE) {
-            nabto_coap_server_handle_data_for_response(server, request, &msg);
+            nabto_coap_server_handle_data_for_response(requests, request, &msg);
             return;
         } else {
             // we should not handle new data in this state.
@@ -81,13 +81,13 @@ void nabto_coap_server_handle_packet(struct nabto_coap_server* server, void* con
         }
     } else if (msg.type == NABTO_COAP_TYPE_ACK) {
         // acks does not contain tokens, so find the appropriate response using messageId and connection
-        struct nabto_coap_server_response* response = nabto_coap_server_find_response(server, msg.messageId, connection);
+        struct nabto_coap_server_response* response = nabto_coap_server_find_response(requests, msg.messageId, connection);
         if (response) {
-            nabto_coap_server_handle_ack(server, response->request, &msg);
+            nabto_coap_server_handle_ack(requests, response->request, &msg);
             return;
         }
     } else if (msg.type == NABTO_COAP_TYPE_RST) {
-        nabto_coap_server_handle_rst(server, msg.messageId, connection);
+        nabto_coap_server_handle_rst(requests, msg.messageId, connection);
     }
 }
 
@@ -117,21 +117,21 @@ bool nabto_coap_server_validate_critical_options(struct nabto_coap_incoming_mess
     return true;
 }
 
-void nabto_coap_server_make_error_response(struct nabto_coap_server* server, void* connection, struct nabto_coap_incoming_message* message, nabto_coap_code code, const char* errorDescription)
+void nabto_coap_server_make_error_response(struct nabto_coap_server_requests* requests, void* connection, struct nabto_coap_incoming_message* message, nabto_coap_code code, const char* errorDescription)
 {
-    server->errorConnection = connection;
-    server->errorCode = code;
-    server->errorToken = message->token;
-    server->errorMessageId = message->messageId;
+    requests->errorConnection = connection;
+    requests->errorCode = code;
+    requests->errorToken = message->token;
+    requests->errorMessageId = message->messageId;
     if (errorDescription != NULL) {
-        server->errorPayload = errorDescription;
-        server->errorPayloadLength = strlen(errorDescription);
+        requests->errorPayload = errorDescription;
+        requests->errorPayloadLength = strlen(errorDescription);
     }
     return;
 
 }
 
-void nabto_coap_server_handle_data_for_request(struct nabto_coap_server* server, struct nabto_coap_server_request* request, struct nabto_coap_incoming_message* message)
+void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests* requests, struct nabto_coap_server_request* request, struct nabto_coap_incoming_message* message)
 {
 
     bool block1Done = true;
@@ -139,7 +139,7 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server* server,
     if (message->hasBlock1) {
         uint32_t offset = NABTO_COAP_BLOCK_OFFSET(message->block1);
         if (request->payloadLength != offset) {
-            nabto_coap_server_make_error_response(server, request->connection, message, NABTO_COAP_CODE_REQUEST_ENTITY_INCOMPLETE, NULL);
+            nabto_coap_server_make_error_response(requests, request->connection, message, NABTO_COAP_CODE_REQUEST_ENTITY_INCOMPLETE, NULL);
             request->isFreed = true;
             request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
             nabto_coap_server_free_request(request);
@@ -149,7 +149,7 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server* server,
         uint32_t more = NABTO_COAP_BLOCK_MORE(message->block1);
         if (more) {
             if (message->payloadLength != NABTO_COAP_BLOCK_SIZE_ABSOLUTE(message->block1)) {
-                nabto_coap_server_make_error_response(server, request->connection, message, NABTO_COAP_CODE_BAD_REQUEST, wrongPayloadLength);
+                nabto_coap_server_make_error_response(requests, request->connection, message, NABTO_COAP_CODE_BAD_REQUEST, wrongPayloadLength);
                 // User will never see this request, so we free for him
                 request->isFreed = true;
                 request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
@@ -159,7 +159,7 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server* server,
         }
         void* newPayload = calloc(1, request->payloadLength + message->payloadLength + 1);
         if (!newPayload) {
-            nabto_coap_server_make_error_response(server, request->connection, message, NABTO_COAP_CODE_SERVICE_UNAVAILABLE, outOfResources);
+            nabto_coap_server_make_error_response(requests, request->connection, message, NABTO_COAP_CODE_SERVICE_UNAVAILABLE, outOfResources);
             // User will never see this request, so we free for him
             request->isFreed = true;
             request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
@@ -209,8 +209,8 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server* server,
     }
 
     if (message->type == NABTO_COAP_TYPE_CON && !request->hasBlock1Ack) {
-        server->ackConnection = request->connection;
-        server->ackMessageId = message->messageId;
+        requests->ackConnection = request->connection;
+        requests->ackMessageId = message->messageId;
     }
 
     if (block1Done) {
@@ -220,44 +220,45 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server* server,
     }
 }
 
-void nabto_coap_server_handle_data_for_response(struct nabto_coap_server* server, struct nabto_coap_server_request* request, struct nabto_coap_incoming_message* message)
+void nabto_coap_server_handle_data_for_response(struct nabto_coap_server_requests* requests, struct nabto_coap_server_request* request, struct nabto_coap_incoming_message* message)
 {
     if (message->hasBlock2) {
         struct nabto_coap_server_response* response = &request->response;
         response->block2Current = NABTO_COAP_BLOCK_NUM(message->block2);
         response->block2Size = NABTO_COAP_BLOCK_SIZE(message->block2);
-        response->messageId = nabto_coap_server_next_message_id(server);
+        response->messageId = nabto_coap_server_next_message_id(requests);
         response->sendNow = true;
     }
 }
 
 
-struct nabto_coap_server_request* nabto_coap_server_handle_new_request(struct nabto_coap_server* server, struct nabto_coap_incoming_message* message, void* connection)
+struct nabto_coap_server_request* nabto_coap_server_handle_new_request(struct nabto_coap_server_requests* requests, struct nabto_coap_incoming_message* message, void* connection)
 {
+    struct nabto_coap_server* server = requests->server;
     {
         struct nabto_coap_server_resource* resource = nabto_coap_server_find_resource(server, message, NULL);
 
         if (!resource) {
-            nabto_coap_server_make_error_response(server, connection, message, NABTO_COAP_CODE_NOT_FOUND, NULL);
+            nabto_coap_server_make_error_response(requests, connection, message, NABTO_COAP_CODE_NOT_FOUND, NULL);
             return NULL;
         }
     }
 
-    if(server->activeRequests >= server->maxRequests) {
-        nabto_coap_server_make_error_response(server, connection, message, NABTO_COAP_CODE_SERVICE_UNAVAILABLE, outOfResources);
+    if(requests->activeRequests >= requests->maxRequests) {
+        nabto_coap_server_make_error_response(requests, connection, message, NABTO_COAP_CODE_SERVICE_UNAVAILABLE, outOfResources);
         return NULL;
     }
-    struct nabto_coap_server_request* request = nabto_coap_server_request_new(server);
+    struct nabto_coap_server_request* request = nabto_coap_server_request_new(requests);
     if (!request) {
-        nabto_coap_server_make_error_response(server, connection, message, NABTO_COAP_CODE_SERVICE_UNAVAILABLE, outOfResources);
+        nabto_coap_server_make_error_response(requests, connection, message, NABTO_COAP_CODE_SERVICE_UNAVAILABLE, outOfResources);
         return NULL;
     }
-    server->activeRequests++;
+    requests->activeRequests++;
 
     struct nabto_coap_server_resource* resource = nabto_coap_server_find_resource(server, message, &request->parameterSentinel);
     if (resource == NULL) {
         // we already know the resource exist, so NULL can only mean the parameter value could not be allocated.
-        nabto_coap_server_make_error_response(server, connection, message, NABTO_COAP_CODE_SERVICE_UNAVAILABLE, outOfResources);
+        nabto_coap_server_make_error_response(requests, connection, message, NABTO_COAP_CODE_SERVICE_UNAVAILABLE, outOfResources);
         // User will never see this request, so we free for him
         request->isFreed = true;
         request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
@@ -272,12 +273,12 @@ struct nabto_coap_server_request* nabto_coap_server_handle_new_request(struct na
     request->token = message->token;
     request->resource = resource;
 
-    nabto_coap_server_insert_request_into_list(server->requestsSentinel, request);
+    nabto_coap_server_insert_request_into_list(requests->requestsSentinel, request);
 
     return request;
 }
 
-void nabto_coap_server_handle_ack(struct nabto_coap_server* server, struct nabto_coap_server_request* request, struct nabto_coap_incoming_message* message)
+void nabto_coap_server_handle_ack(struct nabto_coap_server_requests* requests, struct nabto_coap_server_request* request, struct nabto_coap_incoming_message* message)
 {
     struct nabto_coap_server_response* response = &request->response;
 
@@ -305,10 +306,10 @@ void nabto_coap_server_handle_ack(struct nabto_coap_server* server, struct nabto
 }
 
 
-void nabto_coap_server_handle_rst(struct nabto_coap_server* server, uint16_t messageId, void* connection)
+void nabto_coap_server_handle_rst(struct nabto_coap_server_requests* requests, uint16_t messageId, void* connection)
 {
-    struct nabto_coap_server_request* request = server->requestsSentinel->next;
-    while(request != server->requestsSentinel) {
+    struct nabto_coap_server_request* request = requests->requestsSentinel->next;
+    while(request != requests->requestsSentinel) {
         if (request->connection == connection) {
             if (request->response.messageId == messageId) {
                 request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
@@ -320,10 +321,10 @@ void nabto_coap_server_handle_rst(struct nabto_coap_server* server, uint16_t mes
     }
 }
 
-struct nabto_coap_server_request* nabto_coap_server_find_request(struct nabto_coap_server* server, nabto_coap_token* token, void* connection)
+struct nabto_coap_server_request* nabto_coap_server_find_request(struct nabto_coap_server_requests* requests, nabto_coap_token* token, void* connection)
 {
-    struct nabto_coap_server_request* request = server->requestsSentinel->next;
-    while(request != server->requestsSentinel) {
+    struct nabto_coap_server_request* request = requests->requestsSentinel->next;
+    while(request != requests->requestsSentinel) {
         if (nabto_coap_token_equal(&request->token, token) &&
             connection == request->connection)
         {
@@ -334,10 +335,10 @@ struct nabto_coap_server_request* nabto_coap_server_find_request(struct nabto_co
     return NULL;
 }
 
-struct nabto_coap_server_response* nabto_coap_server_find_response(struct nabto_coap_server* server, uint16_t messageId, void* connection)
+struct nabto_coap_server_response* nabto_coap_server_find_response(struct nabto_coap_server_requests* requests, uint16_t messageId, void* connection)
 {
-    struct nabto_coap_server_request* request = server->requestsSentinel->next;
-    while(request != server->requestsSentinel) {
+    struct nabto_coap_server_request* request = requests->requestsSentinel->next;
+    while(request != requests->requestsSentinel) {
         if(request->connection == connection &&
            request->response.messageId == messageId)
         {
@@ -410,7 +411,7 @@ struct nabto_coap_server_resource* nabto_coap_server_find_resource(struct nabto_
     }
 }
 
-struct nabto_coap_server_request* nabto_coap_server_request_new(struct nabto_coap_server* server)
+struct nabto_coap_server_request* nabto_coap_server_request_new(struct nabto_coap_server_requests* requests)
 {
     struct nabto_coap_server_request* request = calloc(1, sizeof(struct nabto_coap_server_request));
     if (request == NULL) {
@@ -420,11 +421,10 @@ struct nabto_coap_server_request* nabto_coap_server_request_new(struct nabto_coa
     request->parameterSentinel.next = &request->parameterSentinel;
     request->parameterSentinel.prev = &request->parameterSentinel;
     request->isFreed = false;
-    request->server = server;
+    request->requests = requests;
 
     request->response.request = request;
-    request->response.server = server;
-    request->response.messageId = nabto_coap_server_next_message_id(server);
+    request->response.messageId = nabto_coap_server_next_message_id(requests);
     request->response.block2Size = 5; // 512 byte blocks
     return request;
 }
@@ -432,5 +432,5 @@ struct nabto_coap_server_request* nabto_coap_server_request_new(struct nabto_coa
 
 struct nabto_coap_server_request_parameter* nabto_coap_server_request_parameter_new()
 {
-    return calloc(1, sizeof(struct nabto_coap_server_request_parameter));
+    return (struct nabto_coap_server_request_parameter*)calloc(1, sizeof(struct nabto_coap_server_request_parameter));
 }
