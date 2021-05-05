@@ -10,6 +10,7 @@ extern "C" {
 #endif
 
 struct nabto_coap_client_response* nabto_coap_client_test_create_response();
+void nabto_coap_client_test_response_free(struct nabto_coap_client_response* response);
 void nabto_coap_client_test_response_set_code(struct nabto_coap_client_response* response, nabto_coap_code code);
 void nabto_coap_client_test_response_set_payload(struct nabto_coap_client_response* response, const uint8_t* payload, size_t payloadLength);
 void nabto_coap_client_test_response_set_content_format(struct nabto_coap_client_response* response, uint16_t contentFormat);

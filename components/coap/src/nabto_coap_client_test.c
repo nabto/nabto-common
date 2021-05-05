@@ -24,3 +24,9 @@ void nabto_coap_client_test_response_set_content_format(struct nabto_coap_client
     response->contentFormat = contentFormat;
     response->hasContentFormat = true;
 }
+
+void nabto_coap_client_test_response_free(struct nabto_coap_client_response* response)
+{
+    free(response->payload);
+    free(response);
+}
