@@ -229,6 +229,7 @@ void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr,
  */
 void nabto_stream_parse_nonce_response(struct nabto_stream* stream, const uint8_t* ptr, const uint8_t* end, struct nabto_stream_header* hdr)
 {
+    (void)hdr;
     do {
         uint16_t type;
         uint16_t length;
@@ -276,6 +277,7 @@ void nabto_stream_parse_acking(struct nabto_stream* stream, const uint8_t* ptr, 
 
 void nabto_stream_parse_ack_extension(struct nabto_stream* stream, const uint8_t* ptr, uint16_t length, struct nabto_stream_header* hdr)
 {
+    (void)hdr;
     if (stream->state == ST_SYN_RCVD) {
         nabto_stream_handle_ack_on_syn_ack(stream);
     }

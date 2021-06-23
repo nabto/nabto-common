@@ -10,7 +10,7 @@ void nn_llist_init(struct nn_llist* llist)
 
 void nn_llist_deinit(struct nn_llist* llist)
 {
-
+    (void)llist;
 }
 
 void nn_llist_node_init(struct nn_llist_node* node)

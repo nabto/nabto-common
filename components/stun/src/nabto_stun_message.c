@@ -79,6 +79,7 @@ void nabto_stun_message_reset_transaction_id(const struct nabto_stun_module* mod
 
 uint16_t nabto_stun_write_message(uint8_t* buf, uint16_t size, struct nabto_stun_message* msg)
 {
+    (void)size;
     uint8_t* ptr = buf;
     uint32_t bits = 0;
 

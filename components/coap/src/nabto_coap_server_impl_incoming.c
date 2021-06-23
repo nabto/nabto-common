@@ -280,6 +280,7 @@ struct nabto_coap_server_request* nabto_coap_server_handle_new_request(struct na
 
 void nabto_coap_server_handle_ack(struct nabto_coap_server_requests* requests, struct nabto_coap_server_request* request, struct nabto_coap_incoming_message* message)
 {
+    (void)requests;
     struct nabto_coap_server_response* response = &request->response;
 
     if (response->messageId != message->messageId) {

@@ -247,6 +247,7 @@ uint8_t* nabto_coap_server_send_error(struct nabto_coap_server_requests* request
 
 static uint8_t* nabto_coap_server_send_in_request_state(struct nabto_coap_server_requests* requests, struct nabto_coap_server_request* request, uint8_t* buffer, uint8_t* end)
 {
+    (void)requests;
     uint8_t* ptr = buffer;
     struct nabto_coap_message_header header;
     memset(&header, 0, sizeof(struct nabto_coap_message_header));

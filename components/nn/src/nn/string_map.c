@@ -67,6 +67,7 @@ void nn_string_map_erase(struct nn_string_map* map, const char* key)
 
 void nn_string_map_erase_iterator(struct nn_string_map* map, struct nn_string_map_iterator* it)
 {
+    (void)map;
     void* tmp = nn_llist_get_item(&it->it);
     struct nn_string_map_item* item = tmp;
     nn_string_map_destroy_item(item);

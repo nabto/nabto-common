@@ -436,6 +436,7 @@ void nabto_stream_handle_timeout(struct nabto_stream* stream)
 
 void nabto_stream_handle_time_wait(struct nabto_stream* stream)
 {
+    (void)stream;
     // do nothing action happens in event_handled.
 }
 

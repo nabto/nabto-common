@@ -327,6 +327,7 @@ void nabto_coap_client_next_token(struct nabto_coap_client* client, nabto_coap_t
 
 bool nabto_coap_client_request_need_send(struct nabto_coap_client_request* request, uint32_t now)
 {
+    (void)now;
     if (request->state == NABTO_COAP_CLIENT_REQUEST_STATE_SEND_REQUEST) {
         return true;
     }
@@ -592,7 +593,6 @@ void nabto_coap_client_request_cancel(struct nabto_coap_client_request* request)
     } else if (request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_ACK ||
                request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE)
     {
-        struct nabto_coap_client* client = request->client;
         client->needSendRst = true;
         client->messageIdRst = request->messageId;
         client->connectionRst = request->connection;

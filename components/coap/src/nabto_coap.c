@@ -4,7 +4,7 @@
 
 nabto_coap_code nabto_coap_uint16_to_code(uint16_t code)
 {
-    int class = code/100;
+    uint16_t class = code/100;
     code = code - ( class*100 );
     return (nabto_coap_code)(NABTO_COAP_CODE(class, code));
 }
@@ -72,7 +72,7 @@ struct nabto_coap_option_iterator* nabto_coap_get_next_option(struct nabto_coap_
         return NULL;
     }
 
-    iterator->option = delta;
+    iterator->option = (uint16_t)delta;
     iterator->optionDataBegin = ptr;
     iterator->optionDataEnd = ptr + length;
     iterator->buffer = ptr + length;
@@ -129,7 +129,7 @@ bool nabto_coap_parse_message(const uint8_t* packet, size_t packetSize, struct n
     }
 
     msg->token.tokenLength = tokenLength;
-    if (packetSize < 4 + tokenLength) {
+    if (packetSize < tokenLength + 4) {
         return false;
     }
     memcpy(msg->token.token, ptr, tokenLength);
@@ -208,7 +208,7 @@ bool nabto_coap_parse_message(const uint8_t* packet, size_t packetSize, struct n
                 return false;
             } else {
                 msg->hasContentFormat = true;
-                msg->contentFormat = value;
+                msg->contentFormat = (uint16_t)value;
             }
         } else if (iterator->option == NABTO_COAP_OPTION_BLOCK1) {
             if (!nabto_coap_parse_variable_int(iterator->optionDataBegin, iterator->optionDataEnd, 3, &value)) {

@@ -17,7 +17,7 @@
 #include <string.h>
 
 int nabto_stream_get_stats(struct nabto_stream* stream, struct nabto_stream_stats* stats) {
-
+    (void)stream; (void)stats;
     /* stream->stats.rttMin = (uint16_t)(stream->ccStats.rtt.min); */
     /* stream->stats.rttMax = (uint16_t)(stream->ccStats.rtt.max); */
     /* stream->stats.rttAvg = (uint16_t)(stream->ccStats.rtt.avg); */

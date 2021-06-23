@@ -125,7 +125,7 @@ bool nabto_mdns_server_handle_packet(struct nabto_mdns_server_context* context,
                                      const uint8_t* buffer, size_t bufferSize, uint16_t* id)
 {
     if (context->instanceName == NULL) {
-        return false; // not running 
+        return false; // not running
     }
     uint16_t flags;
     // TODO: this discards const qualifier
@@ -196,7 +196,7 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
 
 {
     if (context->instanceName == NULL) {
-        return false; // not running 
+        return false; // not running
     }
     uint8_t* ptr = buffer;
     uint8_t* end = buffer + bufferSize;
@@ -229,8 +229,8 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     records += 1; // PTR _services._dns-sd._udp.local.
     records += 1; // TXT p-abcdexyz-d-xyzabcde._nabto._udp.local.
     records += 1; // SRV p-abcdexyz-d-xyzabcde._nabto._udp.local.
-    records += ipsSize; // A, AAAA p-abcdexyz-d-xyzabcde.local
-    records += nn_string_set_size(context->subtypes); // additional subtypes
+    records += (uint16_t)ipsSize; // A, AAAA p-abcdexyz-d-xyzabcde.local
+    records += (uint16_t)nn_string_set_size(context->subtypes); // additional subtypes
 
     // insert header
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, id);
