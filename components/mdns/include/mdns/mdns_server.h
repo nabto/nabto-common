@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include <nn/ip_address.h>
 
 
 #ifdef __cplusplus
@@ -18,29 +19,6 @@ enum nabto_mdns_record_types {
     NABTO_MDNS_TXT  = 16,
     NABTO_MDNS_AAAA = 28,
     NABTO_MDNS_SRV  = 33
-};
-
-enum nabto_mdns_ip_address_type {
-    NABTO_MDNS_IPV4,
-    NABTO_MDNS_IPV6
-};
-
-// network order ip address
-struct nabto_mdns_ipv4_address {
-    uint8_t addr[4];
-};
-
-// network order ipv6 address
-struct nabto_mdns_ipv6_address {
-    uint8_t addr[16];
-};
-
-struct nabto_mdns_ip_address {
-    enum nabto_mdns_ip_address_type type;
-    union {
-        struct nabto_mdns_ipv4_address v4;
-        struct nabto_mdns_ipv6_address v6;
-    };
 };
 
 struct nabto_mdns_server_context {
@@ -128,7 +106,7 @@ bool nabto_mdns_server_handle_packet(struct nabto_mdns_server_context* context,
  */
 bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
                                     uint16_t id, bool unicastResponse, bool goodbye,
-                                    const struct nabto_mdns_ip_address* ips, const size_t ipsSize, uint16_t port,
+                                    const struct nn_ip_address* ips, const size_t ipsSize, uint16_t port,
                                     uint8_t* buffer, size_t bufferSize, size_t* written);
 
 #ifdef __cplusplus

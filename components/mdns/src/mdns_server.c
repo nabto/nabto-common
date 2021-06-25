@@ -191,7 +191,7 @@ bool nabto_mdns_server_handle_packet(struct nabto_mdns_server_context* context,
 
 bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
                                     uint16_t id, bool unicastResponse, bool goodbye,
-                                    const struct nabto_mdns_ip_address* ips, const size_t ipsSize, uint16_t port,
+                                    const struct nn_ip_address* ips, const size_t ipsSize, uint16_t port,
                                     uint8_t* buffer, size_t bufferSize, size_t* written)
 
 {
@@ -339,18 +339,18 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     for (uint8_t i = 0; i < ipsSize; i++) {
         ptr = nabto_mdns_server_uint16_write_forward(ptr, end, domainLabel);
 
-        if (ips[i].type == NABTO_MDNS_IPV4) {
+        if (ips[i].type == NN_IPV4) {
             ptr = nabto_mdns_server_uint16_write_forward(ptr, end, NABTO_MDNS_A);
             ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 1 + cacheFlushBit); // IN class + cache flush
             ptr = nabto_mdns_server_uint32_write_forward(ptr, end, ttl); // TTL
             ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 4); // size of ipv4
-            ptr = nabto_mdns_server_data_write_forward(ptr, end, ips[i].v4.addr, 4);
-        } else if (ips[i].type == NABTO_MDNS_IPV6) {
+            ptr = nabto_mdns_server_data_write_forward(ptr, end, ips[i].ip.v4, 4);
+        } else if (ips[i].type == NN_IPV6) {
             ptr = nabto_mdns_server_uint16_write_forward(ptr, end, NABTO_MDNS_AAAA);
             ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 1 + cacheFlushBit); // IN class + cache flush
             ptr = nabto_mdns_server_uint32_write_forward(ptr, end, ttl); // TTL
             ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 16); // size of ipv6
-            ptr = nabto_mdns_server_data_write_forward(ptr, end, ips[i].v6.addr, 16);
+            ptr = nabto_mdns_server_data_write_forward(ptr, end, ips[i].ip.v6, 16);
         } else {
             // bad ip input, abort
             return false;
