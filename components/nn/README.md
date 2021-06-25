@@ -8,6 +8,7 @@ Implemented structures:
   * String set based on dynamic allocations `nn/string_set.h`
   * double linked list without allocations `nn/llist.h`
   * string kv map based on dynamic allocations `nn/string_map.h`
+  * IP address structure `nn/ip_address.h`
 
 
 ## Run the test suite

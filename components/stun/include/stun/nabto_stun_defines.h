@@ -2,8 +2,8 @@
 #define NABTO_STUN_DEFINES_H
 
 #include "nabto_stun_types.h"
-#include "nabto_stun_ip_address.h"
 
+#include <nn/ip_address.h>
 #include <nn/log.h>
 
 // Some packets in the filtering tests is expexted to be dropped by
@@ -64,7 +64,7 @@ struct nabto_stun_result {
     enum nabto_stun_nat_result mapping;
     enum nabto_stun_nat_result filtering;
     bool defectNat;
-    struct nabto_stun_endpoint extEp;
+    struct nn_endpoint extEp;
 };
 
 struct nabto_stun_module {

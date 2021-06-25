@@ -60,7 +60,7 @@ uint32_t nabto_stun_uint32_read(const uint8_t* buf)
     return res;
 }
 
-void nabto_stun_init_message(const struct nabto_stun_module* mod, struct nabto_stun_message* msg, bool changeAddr, bool changePort, enum nabto_stun_socket sock, struct nabto_stun_endpoint ep, uint8_t maxRetransmissions, void* modUserData)
+void nabto_stun_init_message(const struct nabto_stun_module* mod, struct nabto_stun_message* msg, bool changeAddr, bool changePort, enum nabto_stun_socket sock, struct nn_endpoint ep, uint8_t maxRetransmissions, void* modUserData)
 {
     msg->state = NONE;
     msg->changeAddress = changeAddr;
@@ -100,14 +100,14 @@ uint16_t nabto_stun_write_message(uint8_t* buf, uint16_t size, struct nabto_stun
     return (uint16_t)(ptr-buf);
 }
 
-bool nabto_stun_parse_address(const uint8_t* buf, struct nabto_stun_endpoint* ep)
+bool nabto_stun_parse_address(const uint8_t* buf, struct nn_endpoint* ep)
 {
     uint16_t family = nabto_stun_uint16_read(buf);
     uint16_t port = nabto_stun_uint16_read(buf + 2);
     ep->port = port;
     if (family == STUN_ADDRESS_FAMILY_V4) {
-        ep->addr.type = NABTO_STUN_IPV4;
-        memcpy(ep->addr.v4.addr,(buf + 4), 4);
+        ep->ip.type = NN_IPV4;
+        memcpy(ep->ip.ip.v4,(buf + 4), 4);
         return true;
     } else if (family == STUN_ADDRESS_FAMILY_V6) {
         //TODO: PARSE IPv6 AND RETURN TRUE
@@ -147,11 +147,11 @@ bool nabto_stun_decode_message(struct nabto_stun_message* msg, const uint8_t* bu
             port = port^(STUN_MAGIC_COOKIE >> 16);
             msg->mappedEp.port = port;
             if (family == STUN_ADDRESS_FAMILY_V4) {
-                memcpy(msg->mappedEp.addr.v4.addr, ptr + n + 8, 4);
+                memcpy(msg->mappedEp.ip.ip.v4, ptr + n + 8, 4);
                 for (size_t i = 0; i < 4; i++) {
-                    msg->mappedEp.addr.v4.addr[i] ^= STUN_MAGIC_COOKIE_BYTES[i];
+                    msg->mappedEp.ip.ip.v4[i] ^= STUN_MAGIC_COOKIE_BYTES[i];
                 }
-                msg->mappedEp.addr.type = NABTO_STUN_IPV4;
+                msg->mappedEp.ip.type = NN_IPV4;
             } else if (family == STUN_ADDRESS_FAMILY_V6) {
                 //printf("family V6\n");
                 //todo: PARSE IPv6 AND REMOVE RETURN

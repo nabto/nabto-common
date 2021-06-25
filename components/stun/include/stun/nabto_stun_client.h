@@ -16,7 +16,7 @@ struct nabto_stun {
     enum nabto_stun_state state;
     bool simple;
 
-    struct nabto_stun_endpoint* eps;
+    struct nn_endpoint* eps;
     uint8_t numEps;
     uint16_t initialPort;
     uint8_t initialTestsSent;
@@ -30,7 +30,7 @@ struct nabto_stun {
 };
 
 
-void nabto_stun_init(struct nabto_stun* stun, struct nabto_stun_module* module, void* modUserData, struct nabto_stun_endpoint* eps, uint8_t numEps);
+void nabto_stun_init(struct nabto_stun* stun, struct nabto_stun_module* module, void* modUserData, struct nn_endpoint* eps, uint8_t numEps);
 
 /**
  * If simple is set to true we only find the global ip and port and
@@ -46,7 +46,7 @@ void nabto_stun_handle_packet(struct nabto_stun* stun, const uint8_t* buf, uint1
 
 void nabto_stun_handle_wait_event(struct nabto_stun* stun);
 
-bool nabto_stun_get_data_endpoint(struct nabto_stun* stun, struct nabto_stun_endpoint* ep);
+bool nabto_stun_get_data_endpoint(struct nabto_stun* stun, struct nn_endpoint* ep);
 
 uint16_t nabto_stun_get_send_data(struct nabto_stun* stun, uint8_t* buf, uint16_t size);
 

@@ -11,7 +11,7 @@ extern "C" {
 
 #define LOG_MODULE "stun"
 
-void nabto_stun_init(struct nabto_stun* stun, struct nabto_stun_module* mod, void* modUserData, struct nabto_stun_endpoint* eps, uint8_t numEps)
+void nabto_stun_init(struct nabto_stun* stun, struct nabto_stun_module* mod, void* modUserData, struct nn_endpoint* eps, uint8_t numEps)
 {
     stun->module = mod;
     stun->moduleUserData = modUserData;
@@ -34,13 +34,13 @@ void nabto_stun_async_analyze(struct nabto_stun* stun, bool simple)//, nabto_stu
     nabto_stun_init_message(stun->module, &stun->test1, false, false, PRIMARY, stun->eps[0], NABTO_STUN_MAX_RETRIES_ACCEPTED, stun->moduleUserData);
 }
 
-bool nabto_stun_get_data_endpoint(struct nabto_stun* stun, struct nabto_stun_endpoint* ep)
+bool nabto_stun_get_data_endpoint(struct nabto_stun* stun, struct nn_endpoint* ep)
 {
     switch(stun->state) {
         case STUN_NOT_STARTED:
             return false;
         case STUN_INITIAL_TEST:
-            ep->addr = stun->eps[stun->initialTestsSent].addr;
+            ep->ip = stun->eps[stun->initialTestsSent].ip;
             ep->port = stun->eps[stun->initialTestsSent].port;
             return true;
         case STUN_TESTING:
@@ -240,11 +240,11 @@ void nabto_stun_init_tests(struct nabto_stun* stun)
 {
     // todo: STUN_PORT should be taken from the ep used for the initial test.
     // todo: STUN_ALT_PORT should be taken from the ADDRESS_CHANGED attribute of the response to the initial test
-    struct nabto_stun_endpoint s1p1 = stun->test1.serverEp;
+    struct nn_endpoint s1p1 = stun->test1.serverEp;
     s1p1.port = NABTO_STUN_PORT;
-    struct nabto_stun_endpoint s1p2 = stun->test1.serverEp;
+    struct nn_endpoint s1p2 = stun->test1.serverEp;
     s1p2.port = NABTO_STUN_ALT_PORT;
-    struct nabto_stun_endpoint s2p1 = stun->test1.altServerEp;
+    struct nn_endpoint s2p1 = stun->test1.altServerEp;
     s2p1.port = NABTO_STUN_PORT;
 
     nabto_stun_init_message(stun->module, &stun->tests[0], false, false, PRIMARY, s1p2, NABTO_STUN_MAX_RETRIES_ACCEPTED, stun->moduleUserData);

@@ -13,6 +13,7 @@ set(src
   src/nn/string_map.c
   src/nn/string_int_map.c
   src/nn/set.c
+  src/nn/ip_address.c
   )
 
 add_library(nn "${src}")
@@ -33,6 +34,7 @@ if (NN_BUILD_TESTS)
     test/nn/string_int_map_test.cpp
     test/nn/string_map_test.cpp
     test/nn/set_test.cpp
+    test/nn/ip_address_test.cpp
     test/unit_test.cpp
 
     )

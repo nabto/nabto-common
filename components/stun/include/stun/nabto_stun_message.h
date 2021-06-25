@@ -44,7 +44,7 @@ struct nabto_stun_message {
     bool changeAddress;
     bool changePort;
     enum nabto_stun_socket sock;
-    struct nabto_stun_endpoint testEp;
+    struct nn_endpoint testEp;
 
     uint8_t transactionId[12];
     uint16_t port;
@@ -52,12 +52,12 @@ struct nabto_stun_message {
     uint8_t retransmissions;
     uint8_t maxRetransmissions;
 
-    struct nabto_stun_endpoint mappedEp;
-    struct nabto_stun_endpoint serverEp;
-    struct nabto_stun_endpoint altServerEp;
+    struct nn_endpoint mappedEp;
+    struct nn_endpoint serverEp;
+    struct nn_endpoint altServerEp;
 };
 
-void nabto_stun_init_message(const struct nabto_stun_module* mod, struct nabto_stun_message* msg, bool changeAddr, bool changePort, enum nabto_stun_socket sock, struct nabto_stun_endpoint ep, uint8_t maxRetransmissions, void* modUserData);
+void nabto_stun_init_message(const struct nabto_stun_module* mod, struct nabto_stun_message* msg, bool changeAddr, bool changePort, enum nabto_stun_socket sock, struct nn_endpoint ep, uint8_t maxRetransmissions, void* modUserData);
 
 void nabto_stun_message_reset_transaction_id(const struct nabto_stun_module* mod, struct nabto_stun_message* msg, void* modUserData);
 
