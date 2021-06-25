@@ -129,7 +129,7 @@ bool nabto_coap_parse_message(const uint8_t* packet, size_t packetSize, struct n
     }
 
     msg->token.tokenLength = tokenLength;
-    if (packetSize < tokenLength + 4) {
+    if (packetSize < tokenLength + 4u) {
         return false;
     }
     memcpy(msg->token.token, ptr, tokenLength);

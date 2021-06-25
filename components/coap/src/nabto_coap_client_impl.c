@@ -415,7 +415,7 @@ uint8_t* nabto_coap_client_request_create_packet(struct nabto_coap_client_reques
     if (payloadOffset < request->payloadLength) {
         size_t payloadRestLength = request->payloadLength - payloadOffset;
 
-        if (request->payloadLength > (16 << request->block1Size)) {
+        if (request->payloadLength > (16u << request->block1Size)) {
             // add block1 option
             uint32_t blockMore = 1;
             if (payloadRestLength <= blockSize) {

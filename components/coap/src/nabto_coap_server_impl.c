@@ -71,7 +71,7 @@ void nabto_coap_server_request_free(struct nabto_coap_server_request* request)
         nabto_coap_server_response_set_code(request, NABTO_COAP_CODE_INTERNAL_SERVER_ERROR);
         request->response.payload = (void*)unhandledRequest;
         request->response.payloadLength = strlen(unhandledRequest);
-        if (strlen(unhandledRequest) > (16 << request->response.block2Size)) {
+        if (strlen(unhandledRequest) > (16u << request->response.block2Size)) {
             request->response.hasBlock2 = true;
             request->response.block2Current = 0;
         }
@@ -540,7 +540,7 @@ nabto_coap_error nabto_coap_server_response_set_payload(struct nabto_coap_server
     }
     memcpy(request->response.payload, data, dataSize);
     request->response.payloadLength = dataSize;
-    if (dataSize > (16 << request->response.block2Size)) {
+    if (dataSize > (16u << request->response.block2Size)) {
         request->response.hasBlock2 = true;
         request->response.block2Current = 0;
     }

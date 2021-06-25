@@ -181,7 +181,7 @@ nabto_stream_status nabto_stream_read_buffer_once(struct nabto_stream* stream, u
             return NABTO_STREAM_STATUS_EOF;
         }
 
-        avail = (size_t)NABTO_STREAM_MIN((segment->size - segment->used), bufferSize);
+        avail = (size_t)NABTO_STREAM_MIN((uint16_t)(segment->size - segment->used), bufferSize);
 
         memcpy(buffer, segment->buf + segment->used, avail);
 

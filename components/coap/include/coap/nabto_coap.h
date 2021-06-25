@@ -155,8 +155,8 @@ struct nabto_coap_incoming_message {
 
 
 
-#define NABTO_COAP_BLOCK_SIZE(value) ((value) & 0x7)
-#define NABTO_COAP_BLOCK_SIZE_ABSOLUTE(value) (16 << NABTO_COAP_BLOCK_SIZE(value))
+#define NABTO_COAP_BLOCK_SIZE(value) ((value) & 0x7u)
+#define NABTO_COAP_BLOCK_SIZE_ABSOLUTE(value) (16u << NABTO_COAP_BLOCK_SIZE(value))
 #define NABTO_COAP_BLOCK_NUM(value) ((value) >> 4)
 #define NABTO_COAP_BLOCK_MORE(value) (((value) & 0xF) >> 3)
 #define NABTO_COAP_BLOCK_OFFSET(value) (NABTO_COAP_BLOCK_SIZE_ABSOLUTE(value) * NABTO_COAP_BLOCK_NUM(value))
