@@ -75,7 +75,7 @@ void nn_string_set_next(struct nn_string_set_iterator* it);
  */
 const char* nn_string_set_get_element(const struct nn_string_set_iterator* it);
 
-#define NN_STRING_SET_FOREACH(element, set) for(struct nn_string_set_iterator it = nn_string_set_begin(set); element = nn_string_set_get_element(&it), !nn_string_set_is_end(&it); nn_string_set_next(&it))
+#define NN_STRING_SET_FOREACH(element, set) for(struct nn_string_set_iterator it_##element = nn_string_set_begin(set); element = nn_string_set_get_element(&it_##element), !nn_string_set_is_end(&it_##element); nn_string_set_next(&it_##element))
 
 #ifdef __cplusplus
 } //extern "C"

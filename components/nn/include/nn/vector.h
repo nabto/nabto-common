@@ -95,7 +95,7 @@ bool nn_vector_is_end(const struct nn_vector_iterator* it);
 /**
  * Helper macro to iterate over all elements in the vector by their reference
  */
-#define NN_VECTOR_FOREACH_REFERENCE(reference, vector) for (struct nn_vector_iterator it = nn_vector_begin(vector); reference = nn_vector_get_reference(&it), !nn_vector_is_end(&it); nn_vector_next(&it))
+#define NN_VECTOR_FOREACH_REFERENCE(reference, vector) for (struct nn_vector_iterator it_##reference = nn_vector_begin(vector); reference = nn_vector_get_reference(&it_##reference), !nn_vector_is_end(&it_##reference); nn_vector_next(&it_##reference))
 
 #ifdef __cplusplus
 } //extern "C"

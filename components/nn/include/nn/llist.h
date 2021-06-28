@@ -119,7 +119,7 @@ void* nn_llist_get_item(const struct nn_llist_iterator* iterator);
  *   ...
  * }
  */
-#define NN_LLIST_FOREACH(item, list) for (struct nn_llist_iterator it = nn_llist_begin(list); item = nn_llist_get_item(&it), !nn_llist_is_end(&it); nn_llist_next(&it))
+#define NN_LLIST_FOREACH(item, list) for (struct nn_llist_iterator it_##item = nn_llist_begin(list); item = nn_llist_get_item(&it_##item), !nn_llist_is_end(&it_##item); nn_llist_next(&it_##item))
 
 #ifdef __cplusplus
 } //extern "C"

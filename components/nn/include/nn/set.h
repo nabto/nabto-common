@@ -28,7 +28,7 @@ struct nn_set_iterator {
 
 /**
  * Initialize a set.
- * 
+ *
  * @param set the set.
  * @param itemSize the size of each item, e.g. sizeof(int).
  * @param less Comparator function comparing two items by their pointer.
@@ -42,14 +42,14 @@ void nn_set_deinit(struct nn_set* set);
 
 /**
  * Insert an item into a set.
- * 
+ *
  * @return false iff the allocation failed
  */
 bool nn_set_insert(struct nn_set* set, void* item);
 
 /**
  * Test if the set contains the given item.
- * 
+ *
  * @return true if the item exists
  */
 bool nn_set_contains(const struct nn_set* set, const void* item);
@@ -94,7 +94,7 @@ void nn_set_next(struct nn_set_iterator* it);
  */
 void nn_set_get_element(const struct nn_set_iterator* it, void* item);
 
-#define NN_SET_FOREACH(item, set) for(struct nn_set_iterator it = nn_set_begin(set); nn_set_get_element(&it, item), !nn_set_is_end(&it); nn_set_next(&it))
+#define NN_SET_FOREACH(item, set) for(struct nn_set_iterator it_##item = nn_set_begin(set); nn_set_get_element(&it_##item, item), !nn_set_is_end(&it_##item); nn_set_next(&it_##item))
 
 
 
