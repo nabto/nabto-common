@@ -102,7 +102,7 @@ void nn_string_set_next(struct nn_string_set_iterator* it)
 
 const char* nn_string_set_get_element(const struct nn_string_set_iterator* it)
 {
-    const char* s;
+    char* s;
     nn_vector_get_element(&it->it, &s);
     return s;
 }
