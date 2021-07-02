@@ -60,6 +60,11 @@ void nn_log_trace_adapter(struct nn_log* logger, const char* module, const char*
 #define NN_LOG_TRACE nn_log_trace_adapter
 #endif
 
+// RAW is used for 3rdparty library logging where the library severity should be passed through
+#ifndef NN_LOG_RAW
+// RAW logging requires varadic macros
+#define NN_LOG_RAW(logger, severity, module, line, file, fmt, ...)
+#endif
 #else
 
 // has variadic macros
@@ -85,6 +90,11 @@ void nn_log_adapter(struct nn_log* logger, enum nn_log_severity severity, const 
 
 #ifndef NN_LOG_TRACE
 #define NN_LOG_TRACE(logger, module, fmt, ...) do { nn_log_adapter(logger, NN_LOG_SEVERITY_TRACE, module, __FILE__, __LINE__, fmt VA_ARGS(__VA_ARGS__)); } while (0)
+#endif
+
+// RAW is used for 3rdparty library logging where the library log parameters should be passed through
+#ifndef NN_LOG_RAW
+#define NN_LOG_RAW(logger, severity, module, line, file, fmt, ...) do { nn_log_adapter(logger, severity, module, file, line, fmt VA_ARGS(__VA_ARGS__)); } while(0)
 #endif
 
 #endif
