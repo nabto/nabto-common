@@ -346,12 +346,12 @@ uint8_t* nabto_coap_encode_payload(const uint8_t* payloadBegin, size_t payloadLe
 
 bool nabto_coap_is_stamp_less(uint32_t s1, uint32_t s2)
 {
-    return (((int32_t)s1 - (int32_t)s2) < 0);
+    return (int32_t)(s1 - s2) < 0;
 }
 
 bool nabto_coap_is_stamp_less_equal(uint32_t s1, uint32_t s2)
 {
-    int32_t diff = ((int32_t)s1) - ((int32_t)s2);
+    int32_t diff = (int32_t)(s1 - s2);
     return diff <= 0;
 }
 
@@ -366,7 +366,7 @@ uint32_t nabto_coap_stamp_min(uint32_t s1, uint32_t s2)
 
 int32_t nabto_coap_stamp_diff(uint32_t s1, uint32_t s2)
 {
-    return ((int32_t)s1) - ((int32_t)s2);
+    return (int32_t)(s1 - s2);
 }
 
 bool nabto_coap_token_equal(nabto_coap_token* t1, nabto_coap_token* t2)

@@ -163,7 +163,8 @@ bool nabto_stream_stamp_less(nabto_stream_stamp s1, nabto_stream_stamp s2)
     } else if (s2.type == NABTO_STREAM_STAMP_NOW) {
         return false;
     } else {
-        return (((int32_t)s1.stamp) - ((int32_t)s2.stamp)) < 0;
+        // Signed integer overflow is undefined so use unsigned arithmetics which is welldefined.
+        return (int32_t)(s1.stamp - s2.stamp) < 0;
     }
 }
 
@@ -186,9 +187,9 @@ bool nabto_stream_is_stamp_passed(struct nabto_stream* stream, nabto_stream_stam
     } else if (s.type == NABTO_STREAM_STAMP_INFINITE) {
         return false;
     } else {
-        int32_t now = stream->module->get_stamp(stream->moduleUserData);
-        int32_t stamp = s.stamp;
-        int32_t diff = stamp - now;
+        uint32_t now = stream->module->get_stamp(stream->moduleUserData);
+        uint32_t stamp = s.stamp;
+        int32_t diff = (int32_t)(stamp - now);
         // if now > stamp
         return (diff <= 0);
     }
@@ -201,9 +202,9 @@ int32_t nabto_stream_stamp_diff_now(struct nabto_stream* stream, nabto_stream_st
     } else if (s.type == NABTO_STREAM_STAMP_INFINITE) {
         return INT32_MAX;
     } else {
-        int32_t now = stream->module->get_stamp(stream->moduleUserData);
-        int32_t stamp = s.stamp;
-        int32_t diff = stamp - now;
+        uint32_t now = stream->module->get_stamp(stream->moduleUserData);
+        uint32_t stamp = s.stamp;
+        int32_t diff = (int32_t)(stamp - now);
         return diff;
     }
 }
@@ -219,20 +220,18 @@ uint32_t nabto_stream_logical_stamp_get(struct nabto_stream* stream)
 
 bool nabto_stream_logical_stamp_less(uint32_t s1, uint32_t s2)
 {
-    return ((int32_t)s1 - (int32_t)s2) < 0;
+    return (int32_t)(s1 - s2) < 0;
 }
 
 bool nabto_stream_logical_stamp_less_or_equal(uint32_t s1, uint32_t s2)
 {
-    return ((int32_t)s1 - (int32_t)s2) <= 0;
+    return (int32_t)(s1 - s2) <= 0;
 }
 
 
 bool nabto_stream_sequence_less(uint32_t lhs, uint32_t rhs)
 {
-    int32_t s1 = (int32_t)lhs;
-    int32_t s2 = (int32_t)rhs;
-    return (s1 - s2) < 0;
+    return (int32_t)(lhs - rhs) < 0;
 }
 
 bool nabto_stream_sequence_less_equal(uint32_t lhs, uint32_t rhs)
