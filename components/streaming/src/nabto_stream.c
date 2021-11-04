@@ -222,6 +222,10 @@ nabto_stream_status nabto_stream_close(struct nabto_stream* stream)
     NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "nabto_stream_close in state %s", nabto_stream_state_as_string(stream->state));
     nabto_stream_state state = stream->state;
 
+    if (state == ST_IDLE) {
+        return NABTO_STREAM_STATUS_INVALID_STATE;
+    }
+
     if (state == ST_ABORTED_RST ||
         state == ST_ABORTED)
     {

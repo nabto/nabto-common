@@ -64,7 +64,8 @@ typedef enum
     NABTO_STREAM_STATUS_OK = 0,
     NABTO_STREAM_STATUS_CLOSED = 1,
     NABTO_STREAM_STATUS_EOF = 2,
-    NABTO_STREAM_STATUS_ABORTED = 3
+    NABTO_STREAM_STATUS_ABORTED = 3,
+    NABTO_STREAM_STATUS_INVALID_STATE = 4
 } nabto_stream_status;
 
 /**************** OPEN/CLOSE *******************************/
