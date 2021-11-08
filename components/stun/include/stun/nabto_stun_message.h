@@ -3,6 +3,10 @@
 
 #include "nabto_stun_defines.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 enum {
     STUN_MESSAGE_BINDING_REQUEST = 0x0001,
     STUN_MESSAGE_BINDING_RESPONSE_SUCCESS = 0x0101
@@ -64,6 +68,10 @@ void nabto_stun_message_reset_transaction_id(const struct nabto_stun_module* mod
 uint16_t nabto_stun_write_message(uint8_t* buf, uint16_t size, struct nabto_stun_message* msg);
 
 bool nabto_stun_decode_message(struct nabto_stun_message* msg, const uint8_t* buf, uint16_t size);
+
+#ifdef __cplusplus
+} //extern "C"
+#endif
 
 
 #endif // NABTO_STUN_MESSAGE_H

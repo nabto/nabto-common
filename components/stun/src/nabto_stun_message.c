@@ -134,7 +134,7 @@ bool nabto_stun_decode_message(struct nabto_stun_message* msg, const uint8_t* bu
     ptr += 2;
     if (type != STUN_MESSAGE_BINDING_RESPONSE_SUCCESS ||
         size < length+20) { // message length + header must fit in packet
-        //printf("not binding response\n");
+        //printf("not binding response (%d vs %d). size: %d, length+20: %d\n", type, STUN_MESSAGE_BINDING_RESPONSE_SUCCESS, size, length+20);
         return false;
     }
     // skip magic cookie and transaction ID
@@ -145,11 +145,15 @@ bool nabto_stun_decode_message(struct nabto_stun_message* msg, const uint8_t* bu
 
         if (n+4+attLen > length) {
             // the specified attribute length does not fit in the packet
+            //printf("invalid AttLen: n+4+attLen %d > length %d\n", n+4+attLen, length);
             return false;
         }
 
-        if ( (attType == STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS_ALT || attType == STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS)
-             && attLen >= 8 ) { // attLen >= 4B header + IPv4
+        if ( attType == STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS_ALT || attType == STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS) {
+            if ( attLen < 8 ) { // attLen < 2B family + 2B port + IPv4
+                //printf("Invalid attLen, no room for IPv4: %d < 8\n", attLen);
+                return false;
+            }
             uint16_t family = nabto_stun_uint16_read(ptr + n + 4);
             uint16_t port = nabto_stun_uint16_read(ptr + n + 6);
             port = port^(STUN_MAGIC_COOKIE >> 16);
@@ -160,7 +164,11 @@ bool nabto_stun_decode_message(struct nabto_stun_message* msg, const uint8_t* bu
                     msg->mappedEp.ip.ip.v4[i] ^= STUN_MAGIC_COOKIE_BYTES[i];
                 }
                 msg->mappedEp.ip.type = NN_IPV4;
-            } else if (family == STUN_ADDRESS_FAMILY_V6 && attLen >= 20) { // IPv6 requires more attLen
+            } else if (family == STUN_ADDRESS_FAMILY_V6) {
+                if (attLen < 20) { // IPv6 requires more attLen
+                    //printf("Invalid attLen, no room for IPv6: %d < 20\n", attLen);
+                    return false;
+                }
                 //printf("family V6\n");
                 //todo: PARSE IPv6 AND REMOVE RETURN
                 return false;
@@ -168,13 +176,21 @@ bool nabto_stun_decode_message(struct nabto_stun_message* msg, const uint8_t* bu
                 //printf("family OTHER\n");
                 return false;
             }
-        } else if (attType == STUN_ATTRIBUTE_RESPONSE_ORIGIN && attLen >= 4) {
+        } else if (attType == STUN_ATTRIBUTE_RESPONSE_ORIGIN) {
+            if ( attLen < 8) {
+                //printf("Invalid attLen in response origin, no room for IPv4: %d < 8\n", attLen);
+                return false;
+            }
             // TODO: When implementing IPv6, attLen should be checked based on IP version
             if(!nabto_stun_parse_address(ptr+n+4, &msg->serverEp)) {
                 //printf("parse response origin\n");
                 return false;
             }
-        } else if (attType == STUN_ATTRIBUTE_OTHER_ADDRESS && attLen >= 4) {
+        } else if (attType == STUN_ATTRIBUTE_OTHER_ADDRESS) {
+            if ( attLen < 8) {
+                //printf("Invalid attLen in other address, no room for IPv4: %d < 8\n", attLen);
+                return false;
+            }
             // TODO: When implementing IPv6, attLen should be checked based on IP version
             if(!nabto_stun_parse_address(ptr+n+4, &msg->altServerEp)) {
                 //printf("parse other address\n");
