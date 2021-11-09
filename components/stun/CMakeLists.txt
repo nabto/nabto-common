@@ -29,4 +29,8 @@ if (STUN_BUILD_TESTS)
 
   target_link_directories(stun_test PRIVATE ${Boost_LIBRARY_DIRS})
   add_definitions(-DBoost_USE_STATIC_LIBS=ON)
+
+  install(TARGETS stun_test
+    RUNTIME DESTINATION bin
+    )
 endif()
