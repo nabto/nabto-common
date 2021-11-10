@@ -149,9 +149,9 @@ class StunTestFixture {
     uint32_t now = 0;
 
 
-    struct nn_ip_address mappedIp = {NN_IPV4, {125, 0, 0, 1}};
-    struct nn_ip_address s1Ip = {NN_IPV4, {126, 0, 0, 1}};
-    struct nn_ip_address s2Ip = {NN_IPV4, {127, 0, 0, 1}};
+    struct nn_ip_address mappedIp = {NN_IPV4, { {125, 0, 0, 1 }}};
+    struct nn_ip_address s1Ip = {NN_IPV4, { {126, 0, 0, 1} }};
+    struct nn_ip_address s2Ip = {NN_IPV4, { {127, 0, 0, 1} }};
     uint16_t mp1 = 4242;
     uint16_t mp2 = 4343;
     uint16_t sp1 = 4444;
