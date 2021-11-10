@@ -207,6 +207,7 @@ void nabto_stun_handle_packet(struct nabto_stun* stun, const uint8_t* buf, uint1
                     // found correct transaction ID
                     if(nabto_stun_decode_message(&stun->tests[i], buf, size)) {
                         stun->tests[i].state = COMPLETED;
+                        nabto_stun_set_next_test(stun);
                         return;
                     } else {
                         NN_LOG_ERROR(stun->module->logger, LOG_MODULE, "decode test message failed");

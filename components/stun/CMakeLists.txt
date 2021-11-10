@@ -18,6 +18,7 @@ if (STUN_BUILD_TESTS)
 
   set(test_src
     test/message_test.cpp
+    test/client_test.cpp
     test/unit_test.cpp
 
     )
