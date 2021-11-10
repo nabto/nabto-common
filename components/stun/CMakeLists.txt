@@ -11,6 +11,7 @@ target_link_libraries(nabto_stun_client nn)
 target_include_directories(nabto_stun_client PUBLIC include)
 
 if (STUN_BUILD_TESTS)
+  set(CMAKE_CXX_STANDARD 14)
   set(test_src
     test/message_test.cpp
     test/client_test.cpp
