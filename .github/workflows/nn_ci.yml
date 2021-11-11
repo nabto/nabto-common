@@ -3,8 +3,9 @@ name: NN-CI
 on:
   push:
 
-defaults.run:
-  working-directory: components/nn
+defaults:
+  run:
+    working-directory: components/nn
 
 jobs:
   build-and-test:
