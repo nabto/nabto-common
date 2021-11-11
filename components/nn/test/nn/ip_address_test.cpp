@@ -30,14 +30,14 @@ BOOST_AUTO_TEST_CASE(is_v4_mapped)
 BOOST_AUTO_TEST_CASE(is_v4)
 {
     struct nn_ip_address ip;
-    ip.type = NABTO_IPV4;
+    ip.type = NN_IPV4;
     BOOST_TEST(nn_ip_is_v4(&ip));
 }
 
 BOOST_AUTO_TEST_CASE(is_v6)
 {
     struct nn_ip_address ip;
-    ip.type = NABTO_IPV6;
+    ip.type = NN_IPV6;
     BOOST_TEST(nn_ip_is_v6(&ip));
 }
 
