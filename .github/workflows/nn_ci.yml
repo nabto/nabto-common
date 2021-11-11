@@ -1,0 +1,26 @@
+name: NN-CI
+
+on:
+  push:
+
+defaults.run:
+  working-directory: components/nn
+
+jobs:
+  build-and-test:
+    name: Build
+    runs-on: ${{matrix.os}}
+    strategy:
+      matrix:
+        os: [windows-2019, ubuntu-18.04, macos-10.15]
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Configure cmake
+        run: mkdir build && cd build && cmake ..
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ./build/nn_test
