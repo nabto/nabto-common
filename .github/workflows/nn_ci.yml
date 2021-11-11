@@ -17,11 +17,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+      - name: Install boost test
+        run: sudo apt-get update && sudo apt-get install -y libboost-test-dev
       - name: Configure cmake
         run: mkdir build && cd build && cmake -DNN_BUILD_TESTS=ON ..
-
       - name: Build
         run: cmake --build build --parallel
-
       - name: Test
         run: ./build/nn_test
