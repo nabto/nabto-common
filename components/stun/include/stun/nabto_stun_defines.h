@@ -22,14 +22,6 @@
 #define NABTO_STUN_SEND_TIMEOUT 500
 #endif
 
-#ifndef NABTO_STUN_PORT
-#define NABTO_STUN_PORT 3478
-#endif
-
-#ifndef NABTO_STUN_ALT_PORT
-#define NABTO_STUN_ALT_PORT 3479
-#endif
-
 enum nabto_stun_socket {
     PRIMARY,
     SECONDARY
