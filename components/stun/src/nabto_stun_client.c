@@ -249,14 +249,12 @@ void nabto_stun_handle_packet(struct nabto_stun* stun, const uint8_t* buf, uint1
 
 void nabto_stun_init_tests(struct nabto_stun* stun)
 {
-    // todo: STUN_PORT should be taken from the ep used for the initial test.
-    // todo: STUN_ALT_PORT should be taken from the ADDRESS_CHANGED attribute of the response to the initial test
+    // rfc 5780 states OTHER_ADDRESS attribute must be s2p2 and that s1 and s2 must use same port numbers. So we can use the port number from altServerEp as p2.
     struct nn_endpoint s1p1 = stun->test1.serverEp;
-    s1p1.port = NABTO_STUN_PORT;
     struct nn_endpoint s1p2 = stun->test1.serverEp;
-    s1p2.port = NABTO_STUN_ALT_PORT;
+    s1p2.port = stun->test1.altServerEp.port;
     struct nn_endpoint s2p1 = stun->test1.altServerEp;
-    s2p1.port = NABTO_STUN_PORT;
+    s2p1.port = stun->test1.serverEp.port;
 
     nabto_stun_init_message(stun->module, &stun->tests[0], false, false, PRIMARY, s1p2, NABTO_STUN_MAX_RETRIES_ACCEPTED, stun->moduleUserData);
     nabto_stun_init_message(stun->module, &stun->tests[1], false, false, PRIMARY, s2p1, NABTO_STUN_MAX_RETRIES_ACCEPTED, stun->moduleUserData);

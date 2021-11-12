@@ -36,7 +36,7 @@ class StunTestFixture {
         eps[0].ip = s1Ip;
         eps[0].port = sp1;
         eps[1].ip = s2Ip;
-        eps[1].port = sp1;
+        eps[1].port = sp2;
     }
 
     void startStunAnalysis(bool simple)
@@ -311,7 +311,7 @@ BOOST_AUTO_TEST_CASE(client_full_cone_nat)
     // test 2
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_SEND_PRIMARY);
-    validateMessage(eps[0].ip, NABTO_STUN_ALT_PORT, false, false);
+    validateMessage(eps[0].ip, sp2, false, false);
     BOOST_TEST(reqBuf[8] == 4);
     writeResponse(4, ep, eps[0], eps[1]);
     nabto_stun_handle_packet(&stun_, respBuf, respSize);
@@ -319,7 +319,7 @@ BOOST_AUTO_TEST_CASE(client_full_cone_nat)
     // test 3
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_SEND_PRIMARY);
-    validateMessage(eps[1].ip, NABTO_STUN_PORT, false, false);
+    validateMessage(s2Ip, sp1, false, false);
     BOOST_TEST(reqBuf[8] == 5);
     writeResponse(5, ep, eps[1], eps[0]);
     nabto_stun_handle_packet(&stun_, respBuf, respSize);
@@ -327,7 +327,7 @@ BOOST_AUTO_TEST_CASE(client_full_cone_nat)
     // test 4
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_SEND_SECONDARY);
-    validateMessage(eps[0].ip, NABTO_STUN_PORT, false, true);
+    validateMessage(eps[0].ip, sp1, false, true);
     BOOST_TEST(reqBuf[8] == 6);
     writeResponse(6, ep, eps[0], eps[1]);
     nabto_stun_handle_packet(&stun_, respBuf, respSize);
@@ -335,7 +335,7 @@ BOOST_AUTO_TEST_CASE(client_full_cone_nat)
     // test 5
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_SEND_SECONDARY);
-    validateMessage(eps[0].ip, NABTO_STUN_PORT, true, false);
+    validateMessage(eps[0].ip, sp1, true, false);
     BOOST_TEST(reqBuf[8] == 7);
     writeResponse(7, ep, eps[1], eps[0]);
     nabto_stun_handle_packet(&stun_, respBuf, respSize);
@@ -343,7 +343,7 @@ BOOST_AUTO_TEST_CASE(client_full_cone_nat)
     // test 6
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_SEND_SECONDARY);
-    validateMessage(eps[0].ip, NABTO_STUN_PORT, false, false);
+    validateMessage(eps[0].ip, sp1, false, false);
     BOOST_TEST(reqBuf[8] == 8);
 
     // tests 2-6 is sent in parallel so we do not expect wait untill now
@@ -356,7 +356,7 @@ BOOST_AUTO_TEST_CASE(client_full_cone_nat)
     // test 7
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_SEND_SECONDARY);
-    validateMessage(eps[1].ip, NABTO_STUN_PORT, false, false);
+    validateMessage(eps[1].ip, sp1, false, false);
     BOOST_TEST(reqBuf[8] == 9);
     writeResponse(9, ep, eps[1], eps[0]);
     nabto_stun_handle_packet(&stun_, respBuf, respSize);
