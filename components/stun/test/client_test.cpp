@@ -96,14 +96,6 @@ class StunTestFixture {
         ptr = nabto_stun_uint16_write_forward(ptr, 36);
         ptr = nabto_stun_uint32_write_forward(ptr, STUN_MAGIC_COOKIE);
         *ptr = id; ptr+= 12;
-        ptr = nabto_stun_uint16_write_forward(ptr, STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS_ALT);
-        ptr = nabto_stun_uint16_write_forward(ptr, 8);
-        ptr = nabto_stun_uint16_write_forward(ptr, STUN_ADDRESS_FAMILY_V4);
-        ptr = nabto_stun_uint16_write_forward(ptr, mapped.port^(STUN_MAGIC_COOKIE >> 16));
-        *ptr = mapped.ip.ip.v4[0]^MAGIC_COOKIE[0]; ptr++;
-        *ptr = mapped.ip.ip.v4[1]^MAGIC_COOKIE[1]; ptr++;
-        *ptr = mapped.ip.ip.v4[2]^MAGIC_COOKIE[2]; ptr++;
-        *ptr = mapped.ip.ip.v4[3]^MAGIC_COOKIE[3]; ptr++;
         ptr = nabto_stun_uint16_write_forward(ptr, STUN_ATTRIBUTE_RESPONSE_ORIGIN);
         ptr = nabto_stun_uint16_write_forward(ptr, 8);
         ptr = nabto_stun_uint16_write_forward(ptr, STUN_ADDRESS_FAMILY_V4);
@@ -120,6 +112,14 @@ class StunTestFixture {
         *ptr = other.ip.ip.v4[1]; ptr++;
         *ptr = other.ip.ip.v4[2]; ptr++;
         *ptr = other.ip.ip.v4[3]; ptr++;
+        ptr = nabto_stun_uint16_write_forward(ptr, STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS_ALT);
+        ptr = nabto_stun_uint16_write_forward(ptr, 8);
+        ptr = nabto_stun_uint16_write_forward(ptr, STUN_ADDRESS_FAMILY_V4);
+        ptr = nabto_stun_uint16_write_forward(ptr, mapped.port^(STUN_MAGIC_COOKIE >> 16));
+        *ptr = mapped.ip.ip.v4[0]^MAGIC_COOKIE[0]; ptr++;
+        *ptr = mapped.ip.ip.v4[1]^MAGIC_COOKIE[1]; ptr++;
+        *ptr = mapped.ip.ip.v4[2]^MAGIC_COOKIE[2]; ptr++;
+        *ptr = mapped.ip.ip.v4[3]^MAGIC_COOKIE[3]; ptr++;
         respSize = ptr-respBuf;
     }
 
@@ -188,6 +188,35 @@ BOOST_AUTO_TEST_CASE(client_simple)
     BOOST_TEST(event == STUN_ET_WAIT);
 
     writeResponse(2, ep, eps[0], eps[1]);
+    nabto_stun_handle_packet(&stun_, respBuf, respSize);
+    event = nabto_stun_next_event_to_handle(&stun_);
+    BOOST_TEST(event == STUN_ET_COMPLETED);
+    struct nabto_stun_result* r = nabto_stun_get_result(&stun_);
+    BOOST_TEST(r->extEp.port == ep.port);
+    for (int i = 0; i < 4; i++) {
+        BOOST_TEST(r->extEp.ip.ip.v4[i] == ep.ip.ip.v4[i]);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(client_simple_missing_attribute)
+{
+    struct nn_endpoint ep = {mappedIp, mp1};
+    startStunAnalysis(true);
+    enum nabto_stun_next_event_type event = nabto_stun_next_event_to_handle(&stun_);
+    BOOST_REQUIRE(event == STUN_ET_SEND_PRIMARY);
+    validateMessage(eps[0].ip, eps[0].port, false, false);
+    BOOST_TEST(reqBuf[8] == 2); // first trans ID is 2
+    event = nabto_stun_next_event_to_handle(&stun_);
+    BOOST_TEST(event == STUN_ET_SEND_PRIMARY);
+    validateMessage(eps[1].ip, eps[1].port, false, false);
+    BOOST_TEST(reqBuf[8] == 3); // second trans ID is 3
+    event = nabto_stun_next_event_to_handle(&stun_);
+    BOOST_TEST(event == STUN_ET_WAIT);
+
+    writeResponse(2, ep, eps[0], eps[1]);
+    nabto_stun_handle_packet(&stun_, respBuf, respSize-12);
+    event = nabto_stun_next_event_to_handle(&stun_);
+    BOOST_TEST(event == STUN_ET_WAIT);
     nabto_stun_handle_packet(&stun_, respBuf, respSize);
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_COMPLETED);

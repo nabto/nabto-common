@@ -184,19 +184,25 @@ void nabto_stun_handle_packet(struct nabto_stun* stun, const uint8_t* buf, uint1
     switch(stun->state) {
         case STUN_INITIAL_TEST:
             if(nabto_stun_decode_message(&stun->test1, buf, size)) {
-                stun->result.extEp = stun->test1.mappedEp;
-                if (stun->simple) {
+                if (stun->test1.mappedEp.port == 0) {
+                    NN_LOG_TRACE(stun->module->logger, LOG_MODULE, "Initial test message did not contain required attributes");
+                    break;
+                } else if (stun->simple) {
+                    stun->result.extEp = stun->test1.mappedEp;
                     stun->state = STUN_COMPLETED;
                     stun->nextEvent = STUN_ET_COMPLETED;
-                } else {
+                    stun->test1.state = COMPLETED;
+                } else if (stun->test1.serverEp.port != 0 ||
+                        stun->test1.altServerEp.port != 0) {
+                    stun->result.extEp = stun->test1.mappedEp;
                     stun->state = STUN_TESTING;
                     stun->nextEvent = STUN_ET_SEND_PRIMARY;
                     nabto_stun_init_tests(stun);
                     nabto_stun_set_next_test(stun);
-
+                    stun->test1.state = COMPLETED;
+                } else {
+                    NN_LOG_TRACE(stun->module->logger, LOG_MODULE, "Initial test message did not contain required attributes");
                 }
-                stun->test1.state = COMPLETED;
-
             } else {
                 NN_LOG_TRACE(stun->module->logger, LOG_MODULE, "decode initial test message failed");
             }
@@ -219,6 +225,10 @@ void nabto_stun_handle_packet(struct nabto_stun* stun, const uint8_t* buf, uint1
         case STUN_DEFECT_ROUTER_TEST:
             if (nabto_stun_check_transaction_id(&stun->defectRouterTest, buf, size)) {
                 if (nabto_stun_decode_message(&stun->defectRouterTest, buf, size)) {
+                    if (stun->defectRouterTest.mappedEp.port == 0) {
+                        NN_LOG_ERROR(stun->module->logger, LOG_MODULE, "decode defect router message did not contain mapped endpoint");
+                        break;
+                    }
                     stun->defectRouterTest.state = COMPLETED;
                     nabto_stun_compute_result_and_stop(stun);
                     return;
