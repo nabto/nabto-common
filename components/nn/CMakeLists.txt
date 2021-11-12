@@ -3,8 +3,6 @@ project(nn)
 
 option(NN_BUILD_TESTS "build nn test program" OFF)
 
-
-
 set(src
   src/nn/vector.c
   src/nn/string_set.c
@@ -18,7 +16,6 @@ set(src
 
 add_library(nn "${src}")
 target_include_directories(nn PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-
 
 if (NN_BUILD_TESTS)
   set(Boost_USE_STATIC_LIBS ON)

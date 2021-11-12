@@ -180,18 +180,27 @@ bool nabto_stun_decode_message(struct nabto_stun_message* msg, const uint8_t* bu
             return false;
         }
 
+        const uint8_t* attPtr = ptr;
+        const uint8_t* attEnd = ptr + attLen;
+
+
         if ( attType == STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS_ALT || attType == STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS) {
-            ptr = nabto_stun_read_endpoint(ptr, attLen, &msg->mappedEp, true);
+            attPtr = nabto_stun_read_endpoint(attPtr, attLen, &msg->mappedEp, true);
         } else if (attType == STUN_ATTRIBUTE_RESPONSE_ORIGIN) {
-            ptr = nabto_stun_read_endpoint(ptr, attLen, &msg->serverEp, false);
+            attPtr = nabto_stun_read_endpoint(attPtr, attLen, &msg->serverEp, false);
         } else if (attType == STUN_ATTRIBUTE_OTHER_ADDRESS) {
-            ptr = nabto_stun_read_endpoint(ptr, attLen, &msg->altServerEp, false);
+            attPtr = nabto_stun_read_endpoint(attPtr, attLen, &msg->altServerEp, false);
         }
-        if (ptr == NULL) { // if read_endpoint returned NULL it means invalid formatting
+        if (attPtr == NULL) { // if read_endpoint returned NULL it means invalid formatting
             //printf("read_endpoint returned NULL\n");
             return false;
-        } else if (attLen % 4 != 0) { // advance ptr by padding
-            ptr += (4-(attLen % 4));
+        }
+
+        if (attLen % 4 == 0) {
+            ptr += attLen;
+        } else {
+            // advance ptr by padding
+            ptr += attLen + (4-(attLen % 4));
         }
     }
     return true;

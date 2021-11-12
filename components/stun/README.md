@@ -3,9 +3,7 @@
 
 ## Tests
 
-This code has a test suite which is located in the private
-nabto-common-cpp repository.
-
+Build code with -DBUILD_STUN_TESTS=ON this requires boost unit test framework installed on the system.
 
 
 
