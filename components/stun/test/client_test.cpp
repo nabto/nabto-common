@@ -8,8 +8,8 @@ extern "C" {
 #endif
 
 uint8_t MAGIC_COOKIE[4] = { 0x21, 0x12, 0xA4, 0x42 };
-uint16_t nabto_stun_uint16_read(const uint8_t* buf);
-uint32_t nabto_stun_uint32_read(const uint8_t* buf);
+const uint8_t* nabto_stun_read_uint16(const uint8_t* ptr, const uint8_t* end, uint16_t* val);
+const uint8_t* nabto_stun_read_uint32(const uint8_t* ptr, const uint8_t* end, uint32_t* val);
 uint8_t* nabto_stun_buf_write_forward(uint8_t* buf, uint8_t* val, uint16_t size);
 uint8_t* nabto_stun_uint16_write_forward(uint8_t* buf, uint16_t val);
 uint8_t* nabto_stun_uint32_write_forward(uint8_t* buf, uint32_t val);
@@ -62,14 +62,19 @@ class StunTestFixture {
 
         reqSize = nabto_stun_get_send_data(&stun_, reqBuf, 512);
         BOOST_REQUIRE(reqSize == 28);
-        BOOST_TEST(nabto_stun_uint16_read(reqBuf) == STUN_MESSAGE_BINDING_REQUEST);
-        BOOST_TEST(nabto_stun_uint16_read(reqBuf+2) == 8);
+        uint16_t tmp;
+        BOOST_TEST((nabto_stun_read_uint16(reqBuf, reqBuf+reqSize, &tmp) != NULL));
+        BOOST_TEST(tmp == STUN_MESSAGE_BINDING_REQUEST);
+        BOOST_TEST((nabto_stun_read_uint16(reqBuf+2, reqBuf+reqSize, &tmp) != NULL));
+        BOOST_TEST(tmp == 8);
         BOOST_TEST(reqBuf[4] == MAGIC_COOKIE[0]);
         BOOST_TEST(reqBuf[5] == MAGIC_COOKIE[1]);
         BOOST_TEST(reqBuf[6] == MAGIC_COOKIE[2]);
         BOOST_TEST(reqBuf[7] == MAGIC_COOKIE[3]);
-        BOOST_TEST(nabto_stun_uint16_read(reqBuf+20) == STUN_ATTRIBUTE_CHANGE_REQUEST);
-        BOOST_TEST(nabto_stun_uint16_read(reqBuf+22) == 4);
+        BOOST_TEST((nabto_stun_read_uint16(reqBuf+20, reqBuf+reqSize, &tmp) != NULL));
+        BOOST_TEST(tmp == STUN_ATTRIBUTE_CHANGE_REQUEST);
+        BOOST_TEST((nabto_stun_read_uint16(reqBuf+22, reqBuf+reqSize, &tmp) != NULL));
+        BOOST_TEST(tmp == 4);
         uint32_t bits = 0;
         if (changePort) {
             bits |= (1<<1);
@@ -77,7 +82,9 @@ class StunTestFixture {
         if (changeAddr) {
             bits |= (1<<2);
         }
-        BOOST_TEST(nabto_stun_uint32_read(reqBuf+24) == bits);
+        uint32_t msgBits;
+        BOOST_TEST((nabto_stun_read_uint32(reqBuf+24, reqBuf+reqSize, &msgBits) != NULL));
+        BOOST_TEST(msgBits == bits);
     }
 
     void writeResponse(uint8_t id, struct nn_endpoint mapped,
@@ -113,7 +120,7 @@ class StunTestFixture {
         *ptr = other.ip.ip.v4[1]; ptr++;
         *ptr = other.ip.ip.v4[2]; ptr++;
         *ptr = other.ip.ip.v4[3]; ptr++;
-        respSize = ptr - reqBuf;
+        respSize = ptr-respBuf;
     }
 
     static uint32_t moduleGetStamp(void* data)

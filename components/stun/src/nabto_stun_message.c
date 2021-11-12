@@ -45,19 +45,28 @@ uint8_t* nabto_stun_uint32_write_forward(uint8_t* buf, uint32_t val)
     return buf;
 }
 
-uint16_t nabto_stun_uint16_read(const uint8_t* buf)
+const uint8_t* nabto_stun_read_uint16(const uint8_t* ptr, const uint8_t* end, uint16_t* val)
 {
-    uint16_t res = ((uint16_t)(buf[0])) << 8;
-    return res + (uint16_t)(buf[1]);
+    if (ptr == NULL || (ptr + 2) > end) {
+        return NULL;
+    }
+    *val =
+        ((uint16_t)ptr[0]) << 8 |
+        ((uint16_t)ptr[1]);
+    return ptr + 2;
 }
 
-uint32_t nabto_stun_uint32_read(const uint8_t* buf)
+const uint8_t* nabto_stun_read_uint32(const uint8_t* ptr, const uint8_t* end, uint32_t* val)
 {
-    uint32_t res = ((uint32_t)buf[0]) << 24;
-    res = res + (((uint32_t)buf[1]) << 16);
-    res = res + (((uint32_t)buf[2]) << 8);
-    res = res + ((uint32_t)buf[3]);
-    return res;
+    if (ptr == NULL || (ptr + 4) > end) {
+        return NULL;
+    }
+    *val =
+        ((uint32_t)ptr[0]) << 24 |
+        ((uint32_t)ptr[1]) << 16 |
+        ((uint32_t)ptr[2]) << 8 |
+        ((uint32_t)ptr[3]);
+    return ptr + 4;
 }
 
 void nabto_stun_init_message(const struct nabto_stun_module* mod, struct nabto_stun_message* msg, bool changeAddr, bool changePort, enum nabto_stun_socket sock, struct nn_endpoint ep, uint8_t maxRetransmissions, void* modUserData)
@@ -100,107 +109,89 @@ uint16_t nabto_stun_write_message(uint8_t* buf, uint16_t size, struct nabto_stun
     return (uint16_t)(ptr-buf);
 }
 
-bool nabto_stun_parse_address(const uint8_t* buf, struct nn_endpoint* ep)
-{
-    uint16_t family = nabto_stun_uint16_read(buf);
-    uint16_t port = nabto_stun_uint16_read(buf + 2);
-    ep->port = port;
-    if (family == STUN_ADDRESS_FAMILY_V4) {
-        ep->ip.type = NN_IPV4;
-        memcpy(ep->ip.ip.v4,(buf + 4), 4);
-        return true;
-    } else if (family == STUN_ADDRESS_FAMILY_V6) {
-        //TODO: PARSE IPv6 AND RETURN TRUE
-        return false;
-    } else {
-        return false;
-    }
-}
-
 // TODO: use logging from nabto_stun_log instead of printf
 //#include <stdio.h>
+
+const uint8_t* nabto_stun_read_endpoint(const uint8_t* buf, uint16_t attLen, struct nn_endpoint* ep, bool xored)
+{
+    const uint8_t* ptr = buf;
+    uint16_t family;
+    uint16_t port;
+    ptr = nabto_stun_read_uint16(ptr, buf + attLen, &family);
+    ptr = nabto_stun_read_uint16(ptr, buf + attLen, &port);
+    if (ptr == NULL) {
+        //printf("family/port read failed\n");
+        return NULL;
+    }
+
+    if (family == STUN_ADDRESS_FAMILY_V4) {
+        if (attLen != 8) { // no room for IP
+            //printf("attLen %d is not 8\n", attLen);
+            ptr = NULL;
+        } else {
+            ep->port = port;
+            ep->ip.type = NN_IPV4;
+            memcpy(ep->ip.ip.v4, ptr, 4);
+            if (xored) {
+                ep->port ^= (STUN_MAGIC_COOKIE >> 16);
+                for (size_t i = 0; i < 4; i++) {
+                    ep->ip.ip.v4[i] ^= STUN_MAGIC_COOKIE_BYTES[i];
+                }
+            }
+            ptr += 4;
+        }
+    } else if (family == STUN_ADDRESS_FAMILY_V6) {
+        ptr = attLen != 20 ? NULL : ptr+16; // IPv6 not supported but ptr must be advanced to continue parsing
+    } else {
+        ptr = NULL; // RFC only defines attribute length for IPv4 and IPv6
+    }
+    return ptr;
+}
+
 bool nabto_stun_decode_message(struct nabto_stun_message* msg, const uint8_t* buf, uint16_t size)
 {
     const uint8_t* ptr = buf;
+    const uint8_t* end = buf+size;
     uint16_t type = 0;
     uint16_t length = 0;
-    uint16_t n = 0;
-    if (size < 20) {
-        return false;
-    }
-    type = nabto_stun_uint16_read(ptr);
-    ptr += 2;
-    length = nabto_stun_uint16_read(ptr);
-    ptr += 2;
-    if (type != STUN_MESSAGE_BINDING_RESPONSE_SUCCESS ||
+
+    ptr = nabto_stun_read_uint16(ptr, end, &type);
+    ptr = nabto_stun_read_uint16(ptr, end, &length);
+    if (ptr == NULL || // above reads failed
+        type != STUN_MESSAGE_BINDING_RESPONSE_SUCCESS || // invalid type
         size < length+20) { // message length + header must fit in packet
         //printf("not binding response (%d vs %d). size: %d, length+20: %d\n", type, STUN_MESSAGE_BINDING_RESPONSE_SUCCESS, size, length+20);
         return false;
     }
     // skip magic cookie and transaction ID
     ptr += 16;
-    while (n+4 <= length) { // if the packet contains another attribute, we must have 4 bytes for its header
-        uint16_t attType = nabto_stun_uint16_read(ptr+n);
-        uint16_t attLen = nabto_stun_uint16_read(ptr+n+2);
+    while (ptr != NULL && ptr < end) {
+        uint16_t attType;
+        uint16_t attLen;
+        ptr = nabto_stun_read_uint16(ptr, end, &attType);
+        ptr = nabto_stun_read_uint16(ptr, end, &attLen);
 
-        if (n+4+attLen > length) {
-            // the specified attribute length does not fit in the packet
-            //printf("invalid AttLen: n+4+attLen %d > length %d\n", n+4+attLen, length);
+        if (ptr == NULL) {
+            // read from buffer failed, so we have reached the end
+
+            return true;
+        } else if (attLen > (end-ptr)) { // no room in packet, invalid packet
+            //printf("invalid AttLen: attLen %d > length %ld\n", attLen, (end-ptr));
             return false;
         }
 
         if ( attType == STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS_ALT || attType == STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS) {
-            if ( attLen < 8 ) { // attLen < 2B family + 2B port + IPv4
-                //printf("Invalid attLen, no room for IPv4: %d < 8\n", attLen);
-                return false;
-            }
-            uint16_t family = nabto_stun_uint16_read(ptr + n + 4);
-            uint16_t port = nabto_stun_uint16_read(ptr + n + 6);
-            port = port^(STUN_MAGIC_COOKIE >> 16);
-            msg->mappedEp.port = port;
-            if (family == STUN_ADDRESS_FAMILY_V4) { // IPv4 length already checked
-                memcpy(msg->mappedEp.ip.ip.v4, ptr + n + 8, 4);
-                for (size_t i = 0; i < 4; i++) {
-                    msg->mappedEp.ip.ip.v4[i] ^= STUN_MAGIC_COOKIE_BYTES[i];
-                }
-                msg->mappedEp.ip.type = NN_IPV4;
-            } else if (family == STUN_ADDRESS_FAMILY_V6) {
-                if (attLen < 20) { // IPv6 requires more attLen
-                    //printf("Invalid attLen, no room for IPv6: %d < 20\n", attLen);
-                    return false;
-                }
-                //printf("family V6\n");
-                //todo: PARSE IPv6 AND REMOVE RETURN
-                return false;
-            } else {
-                //printf("family OTHER\n");
-                return false;
-            }
+            ptr = nabto_stun_read_endpoint(ptr, attLen, &msg->mappedEp, true);
         } else if (attType == STUN_ATTRIBUTE_RESPONSE_ORIGIN) {
-            if ( attLen < 8) {
-                //printf("Invalid attLen in response origin, no room for IPv4: %d < 8\n", attLen);
-                return false;
-            }
-            // TODO: When implementing IPv6, attLen should be checked based on IP version
-            if(!nabto_stun_parse_address(ptr+n+4, &msg->serverEp)) {
-                //printf("parse response origin\n");
-                return false;
-            }
+            ptr = nabto_stun_read_endpoint(ptr, attLen, &msg->serverEp, false);
         } else if (attType == STUN_ATTRIBUTE_OTHER_ADDRESS) {
-            if ( attLen < 8) {
-                //printf("Invalid attLen in other address, no room for IPv4: %d < 8\n", attLen);
-                return false;
-            }
-            // TODO: When implementing IPv6, attLen should be checked based on IP version
-            if(!nabto_stun_parse_address(ptr+n+4, &msg->altServerEp)) {
-                //printf("parse other address\n");
-                return false;
-            }
+            ptr = nabto_stun_read_endpoint(ptr, attLen, &msg->altServerEp, false);
         }
-        if (attLen % 4 != 0) { // advance length + header + padding
-            n += attLen + 4 + (4-(attLen % 4));
-        } else { // advance length + header
-            n += attLen + 4;
+        if (ptr == NULL) { // if read_endpoint returned NULL it means invalid formatting
+            //printf("read_endpoint returned NULL\n");
+            return false;
+        } else if (attLen % 4 != 0) { // advance ptr by padding
+            ptr += (4-(attLen % 4));
         }
     }
     return true;

@@ -168,11 +168,10 @@ BOOST_AUTO_TEST_CASE(decode_xor_addr_ipv6)
     ptr = uint16_write_forward(ptr, 4242);
 
     struct nabto_stun_message msg;
+    msg.mappedEp.port = 0;
     bool res = nabto_stun_decode_message(&msg, buf, 45);
-    // TODO: IPv6 currently not supported
-    BOOST_TEST(!res);
-    //BOOST_TEST(msg.mappedEp.ip.type == NN_IPV6);
-    //BOOST_TEST(msg.mappedEp.port == (4242^(STUN_MAGIC_COOKIE >> 16)));
+    BOOST_TEST(res);
+    BOOST_TEST(msg.mappedEp.port == 0);  // IPv6 should leave ep untouched
 }
 
 BOOST_AUTO_TEST_CASE(decode_response_origin_ipv6)
@@ -188,11 +187,10 @@ BOOST_AUTO_TEST_CASE(decode_response_origin_ipv6)
     ptr = uint16_write_forward(ptr, 4242);
 
     struct nabto_stun_message msg;
+    msg.serverEp.port = 0;
     bool res = nabto_stun_decode_message(&msg, buf, 45);
-    // TODO: IPv6 currently not supported
-    BOOST_TEST(!res);
-    //BOOST_TEST(msg.mappedEp.ip.type == NN_IPV6);
-    //BOOST_TEST(msg.mappedEp.port == (4242^(STUN_MAGIC_COOKIE >> 16)));
+    BOOST_TEST(res);
+    BOOST_TEST(msg.serverEp.port == 0);  // IPv6 should leave ep untouched
 }
 
 BOOST_AUTO_TEST_CASE(decode_other_addr_ipv6)
@@ -208,11 +206,10 @@ BOOST_AUTO_TEST_CASE(decode_other_addr_ipv6)
     ptr = uint16_write_forward(ptr, 4242);
 
     struct nabto_stun_message msg;
+    msg.altServerEp.port = 0;
     bool res = nabto_stun_decode_message(&msg, buf, 45);
-    // TODO: IPv6 currently not supported
-    BOOST_TEST(!res);
-    //BOOST_TEST(msg.mappedEp.ip.type == NN_IPV6);
-    //BOOST_TEST(msg.mappedEp.port == (4242^(STUN_MAGIC_COOKIE >> 16)));
+    BOOST_TEST(res);
+    BOOST_TEST(msg.altServerEp.port == 0);  // IPv6 should leave ep untouched
 }
 
 BOOST_AUTO_TEST_CASE(decode_full_packet)
