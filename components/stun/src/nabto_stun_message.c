@@ -115,9 +115,10 @@ uint16_t nabto_stun_write_message(uint8_t* buf, uint16_t size, struct nabto_stun
 const uint8_t* nabto_stun_read_endpoint(const uint8_t* buf, uint16_t attLen, struct nn_endpoint* ep, bool xored)
 {
     const uint8_t* ptr = buf;
-    uint16_t family;
+    uint8_t family;
     uint16_t port;
-    ptr = nabto_stun_read_uint16(ptr, buf + attLen, &family);
+    ptr += 1; // first byte must be ignored according to the RFC.
+    family = *ptr; ptr += 1;
     ptr = nabto_stun_read_uint16(ptr, buf + attLen, &port);
     if (ptr == NULL) {
         //printf("family/port read failed\n");
