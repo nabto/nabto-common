@@ -20,7 +20,7 @@ jobs:
       - name: Install boost test
         run: sudo apt-get update && sudo apt-get install -y libboost-test-dev
       - name: Configure cmake
-        run: mkdir build && cd build && cmake -DSTUN_BUILD_TESTS=ON ..
+        run: mkdir build && cd build && cmake -DSTUN_BUILD_TESTS=ON ../ci-build
       - name: Build
         run: cmake --build build --parallel
       - name: Test
