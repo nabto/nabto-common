@@ -5,19 +5,24 @@
 
 #include <set>
 
+static struct nn_allocator defaultAllocator = {
+    .calloc = &calloc,
+    .free = &free
+};
+
 BOOST_AUTO_TEST_SUITE(string_set)
 
 BOOST_AUTO_TEST_CASE(init_deinit)
 {
     struct nn_string_set set;
-    nn_string_set_init(&set);
+    nn_string_set_init(&set, &defaultAllocator);
     nn_string_set_deinit(&set);
 }
 
 BOOST_AUTO_TEST_CASE(add_contains)
 {
     struct nn_string_set set;
-    nn_string_set_init(&set);
+    nn_string_set_init(&set, &defaultAllocator);
 
     nn_string_set_insert(&set, "foo");
     nn_string_set_insert(&set, "bar");
@@ -31,7 +36,7 @@ BOOST_AUTO_TEST_CASE(add_contains)
 BOOST_AUTO_TEST_CASE(erase_item)
 {
     struct nn_string_set set;
-    nn_string_set_init(&set);
+    nn_string_set_init(&set, &defaultAllocator);
 
     nn_string_set_insert(&set, "foo");
     nn_string_set_insert(&set, "bar");
@@ -52,7 +57,7 @@ BOOST_AUTO_TEST_CASE(erase_item)
 BOOST_AUTO_TEST_CASE(iterator)
 {
     struct nn_string_set set;
-    nn_string_set_init(&set);
+    nn_string_set_init(&set, &defaultAllocator);
 
     nn_string_set_insert(&set, "foo");
     nn_string_set_insert(&set, "bar");

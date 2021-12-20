@@ -4,15 +4,16 @@
 #include <string.h>
 #include <stdint.h>
 
-void nn_vector_init(struct nn_vector* vector, size_t itemSize)
+void nn_vector_init(struct nn_vector* vector, size_t itemSize, struct nn_allocator* allocator)
 {
     memset(vector, 0, sizeof(struct nn_vector));
     vector->itemSize = itemSize;
+    vector->allocator = *allocator;
 }
 
 void nn_vector_deinit(struct nn_vector* vector)
 {
-    free(vector->elements);
+    vector->allocator.free(vector->elements);
     vector->elements = NULL;
     vector->capacity = 0;
     vector->used = 0;
@@ -26,12 +27,12 @@ bool nn_vector_push_back(struct nn_vector* vector, void* element)
         if (newCapacity == 0) {
             newCapacity = 1;
         }
-        void** newElements = malloc(newCapacity * vector->itemSize);
+        void** newElements = vector->allocator.calloc(newCapacity,vector->itemSize);
         if (newElements == NULL) {
             return false;
         }
         memcpy(newElements, vector->elements, (vector->capacity * vector->itemSize));
-        free(vector->elements);
+        vector->allocator.free(vector->elements);
         vector->elements = newElements;
         vector->capacity = newCapacity;
     }

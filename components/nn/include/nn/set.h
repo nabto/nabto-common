@@ -33,7 +33,7 @@ struct nn_set_iterator {
  * @param itemSize the size of each item, e.g. sizeof(int).
  * @param less Comparator function comparing two items by their pointer.
  */
-void nn_set_init(struct nn_set* set, size_t itemSize, nn_set_less less);
+void nn_set_init(struct nn_set* set, size_t itemSize, nn_set_less less, struct nn_allocator* allocator);
 
 /**
  * Deinitialize a set.

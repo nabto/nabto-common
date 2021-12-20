@@ -3,12 +3,17 @@
 #include <nn/string_int_map.h>
 
 
+static struct nn_allocator defaultAllocator = {
+    .calloc = &calloc,
+    .free = &free
+};
+
 BOOST_AUTO_TEST_SUITE(string_int_map)
 
 BOOST_AUTO_TEST_CASE(basic)
 {
     struct nn_string_int_map map;
-    nn_string_int_map_init(&map);
+    nn_string_int_map_init(&map, &defaultAllocator);
 
     struct nn_string_int_map_iterator it = nn_string_int_map_insert(&map, "key", 42);
 

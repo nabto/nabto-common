@@ -3,10 +3,10 @@
 
 #include <stdlib.h>
 
-void nn_set_init(struct nn_set* set, size_t itemSize, nn_set_less less)
+void nn_set_init(struct nn_set* set, size_t itemSize, nn_set_less less, struct nn_allocator* allocator)
 {
     set->less = less;
-    nn_vector_init(&set->items, itemSize);
+    nn_vector_init(&set->items, itemSize, allocator);
 }
 
 void nn_set_deinit(struct nn_set* set)
@@ -40,7 +40,7 @@ bool nn_set_contains(const struct nn_set* set, const void* item)
     const void* e;
     NN_VECTOR_FOREACH_REFERENCE(e, &set->items)
     {
-        // 
+        //
         if (nn_set_equal(set, e, item)) {
             return true;
         }

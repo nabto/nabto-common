@@ -5,6 +5,12 @@
 
 #include <set>
 
+static struct nn_allocator defaultAllocator = {
+    .calloc = &calloc,
+    .free = &free
+};
+
+
 bool int_less(const void* lhs, const void* rhs)
 {
     const int* l = (const int*)lhs;
@@ -17,14 +23,14 @@ BOOST_AUTO_TEST_SUITE(set)
 BOOST_AUTO_TEST_CASE(init_deinit)
 {
     struct nn_set set;
-    nn_set_init(&set, sizeof(int), int_less);
+    nn_set_init(&set, sizeof(int), int_less, &defaultAllocator);
     nn_set_deinit(&set);
 }
 
 BOOST_AUTO_TEST_CASE(add_contains)
 {
     struct nn_set set;
-    nn_set_init(&set, sizeof(int), int_less);
+    nn_set_init(&set, sizeof(int), int_less, &defaultAllocator);
 
     int foo = 2;
     int bar = 3;
@@ -42,7 +48,7 @@ BOOST_AUTO_TEST_CASE(add_contains)
 BOOST_AUTO_TEST_CASE(erase_item)
 {
     struct nn_set set;
-    nn_set_init(&set, sizeof(int), int_less);
+    nn_set_init(&set, sizeof(int), int_less, &defaultAllocator);
 
     int foo = 2;
     int bar = 3;
@@ -67,7 +73,7 @@ BOOST_AUTO_TEST_CASE(erase_item)
 BOOST_AUTO_TEST_CASE(iterator)
 {
     struct nn_set set;
-    nn_set_init(&set, sizeof(int), int_less);
+    nn_set_init(&set, sizeof(int), int_less, &defaultAllocator);
 
     int foo = 2;
     int bar = 3;

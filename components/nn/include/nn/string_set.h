@@ -9,6 +9,7 @@ extern "C" {
 
 struct nn_string_set {
     struct nn_vector strings;
+    struct nn_allocator allocator;
 };
 
 struct nn_string_set_iterator {
@@ -18,7 +19,7 @@ struct nn_string_set_iterator {
 /**
  * init the string set
  */
-void nn_string_set_init(struct nn_string_set* set);
+void nn_string_set_init(struct nn_string_set* set, struct nn_allocator* allocator);
 
 /**
  * deinit the string set

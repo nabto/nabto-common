@@ -2,7 +2,7 @@
 #define _NN_LLIST_H_
 
 /**
- * Malloc free  linked list implementation.
+ * Linked list implementation, which does not use malloc/free.
  */
 
 #include <stdbool.h>

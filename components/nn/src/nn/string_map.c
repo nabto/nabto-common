@@ -1,13 +1,15 @@
 #include <nn/string_map.h>
+#include <nn/string.h>
 
 #include <stdlib.h>
 #include <string.h>
 
-static void nn_string_map_destroy_item(struct nn_string_map_item* item);
+static void nn_string_map_destroy_item(struct nn_string_map* map, struct nn_string_map_item* item);
 
-void nn_string_map_init(struct nn_string_map* map)
+void nn_string_map_init(struct nn_string_map* map, struct nn_allocator* allocator)
 {
     nn_llist_init(&map->items);
+    map->allocator = *allocator;
 }
 
 void nn_string_map_deinit(struct nn_string_map* map)
@@ -16,17 +18,17 @@ void nn_string_map_deinit(struct nn_string_map* map)
     while(!nn_llist_is_end(&it))
     {
         struct nn_string_map_item* item = nn_llist_get_item(&it);
-        nn_string_map_destroy_item(item);
+        nn_string_map_destroy_item(map, item);
         it = nn_llist_begin(&map->items);
     }
 }
 
-void nn_string_map_destroy_item(struct nn_string_map_item* item)
+void nn_string_map_destroy_item(struct nn_string_map* map, struct nn_string_map_item* item)
 {
     nn_llist_erase_node(&item->node);
-    free(item->key);
-    free(item->value);
-    free(item);
+    map->allocator.free(item->key);
+    map->allocator.free(item->value);
+    map->allocator.free(item);
 }
 
 struct nn_string_map_iterator nn_string_map_insert(struct nn_string_map* map, const char* key, const char* value)
@@ -39,11 +41,11 @@ struct nn_string_map_iterator nn_string_map_insert(struct nn_string_map* map, co
         }
     }
 
-    struct nn_string_map_item* item = calloc(1, sizeof(struct nn_string_map_item));
-    char* keyDup = strdup(key);
-    char* valueDup = strdup(value);
+    struct nn_string_map_item* item = map->allocator.calloc(1, sizeof(struct nn_string_map_item));
+    char* keyDup = nn_strdup(key, &map->allocator);
+    char* valueDup = nn_strdup(value, &map->allocator);
     if (item == NULL || keyDup == NULL || valueDup == NULL) {
-        free(item); free(keyDup); free(valueDup);
+        map->allocator.free(item); map->allocator.free(keyDup); map->allocator.free(valueDup);
         return nn_string_map_end(map);
     }
 
@@ -70,7 +72,7 @@ void nn_string_map_erase_iterator(struct nn_string_map* map, struct nn_string_ma
     (void)map;
     void* tmp = nn_llist_get_item(&it->it);
     struct nn_string_map_item* item = tmp;
-    nn_string_map_destroy_item(item);
+    nn_string_map_destroy_item(map, item);
 }
 
 struct nn_string_map_iterator nn_string_map_get(const struct nn_string_map* map, const char* key)
