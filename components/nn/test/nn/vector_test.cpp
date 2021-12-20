@@ -75,5 +75,32 @@ BOOST_AUTO_TEST_CASE(iterator)
     nn_vector_deinit(&vector);
 }
 
+#define BLOCK_SIZE 42
+struct large_element {
+    uint8_t block[BLOCK_SIZE];
+};
+
+BOOST_AUTO_TEST_CASE(larger_elements)
+{
+
+    struct nn_vector vector;
+    nn_vector_init(&vector, sizeof(struct large_element));
+
+    struct large_element foo;
+    memset(foo.block, 42, BLOCK_SIZE);
+
+    nn_vector_push_back(&vector, &foo);
+    nn_vector_push_back(&vector, &foo);
+    nn_vector_push_back(&vector, &foo);
+
+    struct large_element element;
+    NN_VECTOR_FOREACH(&element, &vector)
+    {
+        BOOST_TEST(memcmp(element.block, foo.block, BLOCK_SIZE) == 0);
+    }
+
+    nn_vector_deinit(&vector);
+}
+
 
 BOOST_AUTO_TEST_SUITE_END()

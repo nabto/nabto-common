@@ -26,11 +26,11 @@ bool nn_vector_push_back(struct nn_vector* vector, void* element)
         if (newCapacity == 0) {
             newCapacity = 1;
         }
-        void** newElements = malloc(newCapacity*sizeof(void*));
+        void** newElements = malloc(newCapacity * vector->itemSize);
         if (newElements == NULL) {
             return false;
         }
-        memcpy(newElements, vector->elements, (vector->capacity * sizeof(void*)));
+        memcpy(newElements, vector->elements, (vector->capacity * vector->itemSize));
         free(vector->elements);
         vector->elements = newElements;
         vector->capacity = newCapacity;
