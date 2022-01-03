@@ -5,12 +5,13 @@
 
 const char* unhandledRequest = "Request unhandled";
 
-nabto_coap_error nabto_coap_server_init(struct nabto_coap_server* server)
+nabto_coap_error nabto_coap_server_init(struct nabto_coap_server* server, struct nn_allocator* allocator)
 {
     memset(server, 0, sizeof(struct nabto_coap_server));
+    server->allocator = *allocator;
     server->ackTimeout = NABTO_COAP_ACK_TIMEOUT;
 
-    server->root = nabto_coap_router_node_new();
+    server->root = nabto_coap_router_node_new(server);
     if (server->root == NULL) {
         return NABTO_COAP_ERROR_OUT_OF_MEMORY;
     }
@@ -19,7 +20,7 @@ nabto_coap_error nabto_coap_server_init(struct nabto_coap_server* server)
 
 void nabto_coap_server_destroy(struct nabto_coap_server* server)
 {
-    nabto_coap_router_node_free(server->root);
+    nabto_coap_router_node_free(server, server->root);
 }
 
 nabto_coap_error nabto_coap_server_requests_init(struct nabto_coap_server_requests* requests, struct nabto_coap_server* server, nabto_coap_get_stamp getStamp, nabto_coap_notify_event notifyEvent, void* userData)
@@ -32,7 +33,7 @@ nabto_coap_error nabto_coap_server_requests_init(struct nabto_coap_server_reques
     requests->maxRequests = SIZE_MAX;
 
     // init requests list
-    requests->requestsSentinel = calloc(1, sizeof(struct nabto_coap_server_request));
+    requests->requestsSentinel = server->allocator.calloc(1, sizeof(struct nabto_coap_server_request));
     if (requests->requestsSentinel == NULL) {
         return NABTO_COAP_ERROR_OUT_OF_MEMORY;
     }
@@ -44,6 +45,7 @@ nabto_coap_error nabto_coap_server_requests_init(struct nabto_coap_server_reques
 
 void nabto_coap_server_requests_destroy(struct nabto_coap_server_requests* requests)
 {
+    struct nabto_coap_server* server = requests->server;
     struct nabto_coap_server_request* iterator = requests->requestsSentinel->next;
     while(iterator != requests->requestsSentinel) {
         struct nabto_coap_server_request* current = iterator;
@@ -51,7 +53,7 @@ void nabto_coap_server_requests_destroy(struct nabto_coap_server_requests* reque
         current->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
         nabto_coap_server_free_request(current);
     }
-    free(requests->requestsSentinel);
+    server->allocator.free(requests->requestsSentinel);
 
     requests->requestsSentinel = NULL;
 }
@@ -365,6 +367,7 @@ uint8_t* nabto_coap_server_handle_send(struct nabto_coap_server_requests* reques
 
 void nabto_coap_server_free_request(struct nabto_coap_server_request* request)
 {
+    struct nabto_coap_server* server = request->requests->server;
     struct nabto_coap_server_requests* requests = request->requests;
     if (!request->isFreed || request->state != NABTO_COAP_SERVER_REQUEST_STATE_DONE) {
         // dont free before user frees and server is done
@@ -373,23 +376,23 @@ void nabto_coap_server_free_request(struct nabto_coap_server_request* request)
     nabto_coap_server_remove_request_from_list(request);
 
     if (request->payload) {
-        free(request->payload);
+        server->allocator.free(request->payload);
     }
 
     if (!request->response.staticPayload && request->response.payload) {
-        free(request->response.payload);
+        server->allocator.free(request->response.payload);
     }
 
     struct nabto_coap_server_request_parameter* iterator = request->parameterSentinel.next;
     while(iterator != &request->parameterSentinel) {
         struct nabto_coap_server_request_parameter* current = iterator;
         iterator = iterator->next;
-        free(current->value);
-        free(current);
+        server->allocator.free(current->value);
+        server->allocator.free(current);
     }
 
 
-    free(request);
+    server->allocator.free(request);
 
     requests->activeRequests--;
 }
@@ -407,7 +410,7 @@ void nabto_coap_server_remove_resource(struct nabto_coap_server_resource* resour
 
 nabto_coap_error nabto_coap_server_add_resource(struct nabto_coap_server* server, nabto_coap_code method, const char** segments, nabto_coap_server_resource_handler handler, void* userData, struct nabto_coap_server_resource** resource)
 {
-    return nabto_coap_server_add_resource_into_tree(server->root, method, segments, handler, userData, resource);
+    return nabto_coap_server_add_resource_into_tree(server, server->root, method, segments, handler, userData, resource);
 }
 
 struct nabto_coap_router_path_segment* nabto_coap_server_find_path_segment(struct nabto_coap_router_node* node, const char* segment, size_t segmentLength)
@@ -434,7 +437,7 @@ void nabto_coap_router_insert_path_segment(struct nabto_coap_router_path_segment
     segment->prev = before;
 }
 
-nabto_coap_error nabto_coap_server_add_resource_into_tree(struct nabto_coap_router_node* parent, nabto_coap_code method, const char** path, nabto_coap_server_resource_handler handler, void* userData, struct nabto_coap_server_resource** userRes)
+nabto_coap_error nabto_coap_server_add_resource_into_tree(struct nabto_coap_server* server, struct nabto_coap_router_node* parent, nabto_coap_code method, const char** path, nabto_coap_server_resource_handler handler, void* userData, struct nabto_coap_server_resource** userRes)
 {
     if (*path == NULL) {
         struct nabto_coap_server_resource* resource = NULL;
@@ -460,15 +463,15 @@ nabto_coap_error nabto_coap_server_add_resource_into_tree(struct nabto_coap_rout
         if (*segment == '{') {
             // this is a parameter
             if (parent->parameter.name == NULL) {
-                char* parameterName = calloc(strlen(segment) - 1, 1); // remove start and end {}
+                char* parameterName = server->allocator.calloc(strlen(segment) - 1, 1); // remove start and end {}
                 if (parameterName == NULL) {
                     return NABTO_COAP_ERROR_OUT_OF_MEMORY;
                 }
                 memcpy(parameterName, segment+1, strlen(segment)-2);
                 parent->parameter.name = parameterName;
-                parent->parameter.node = nabto_coap_router_node_new();
+                parent->parameter.node = nabto_coap_router_node_new(server);
                 if (parent->parameter.node == NULL) {
-                    free(parameterName);
+                    server->allocator.free(parameterName);
                     parent->parameter.name = NULL;
                     return NABTO_COAP_ERROR_OUT_OF_MEMORY;
                 }
@@ -481,19 +484,19 @@ nabto_coap_error nabto_coap_server_add_resource_into_tree(struct nabto_coap_rout
         } else {
             struct nabto_coap_router_path_segment* pathSegment = nabto_coap_server_find_path_segment(parent, segment, strlen(segment));
             if (pathSegment == NULL) {
-                pathSegment = nabto_coap_router_path_segment_new();
+                pathSegment = nabto_coap_router_path_segment_new(server);
                 if (pathSegment == NULL) {
                     return NABTO_COAP_ERROR_OUT_OF_MEMORY;
                 }
                 pathSegment->segment = strdup(segment);
                 if (pathSegment->segment == NULL) {
-                    free(pathSegment);
+                    server->allocator.free(pathSegment);
                     return NABTO_COAP_ERROR_OUT_OF_MEMORY;
                 }
-                pathSegment->node = nabto_coap_router_node_new();
+                pathSegment->node = nabto_coap_router_node_new(server);
                 if (pathSegment->node == NULL) {
-                    free(pathSegment->segment);
-                    free(pathSegment);
+                    server->allocator.free(pathSegment->segment);
+                    server->allocator.free(pathSegment);
                     return NABTO_COAP_ERROR_OUT_OF_MEMORY;
                 }
                 nabto_coap_router_insert_path_segment(parent->pathSegmentsSentinel.prev, pathSegment);
@@ -501,7 +504,7 @@ nabto_coap_error nabto_coap_server_add_resource_into_tree(struct nabto_coap_rout
             child = pathSegment->node;
         }
 
-        return nabto_coap_server_add_resource_into_tree(child, method, path+1, handler, userData, userRes);
+        return nabto_coap_server_add_resource_into_tree(server, child, method, path+1, handler, userData, userRes);
     }
     return NABTO_COAP_ERROR_OK;
 }
@@ -534,7 +537,8 @@ void nabto_coap_server_response_set_code_human(struct nabto_coap_server_request*
 
 nabto_coap_error nabto_coap_server_response_set_payload(struct nabto_coap_server_request* request, const void* data, size_t dataSize)
 {
-    request->response.payload = calloc(1, dataSize + 1);
+    struct nabto_coap_server* server = request->requests->server;
+    request->response.payload = server->allocator.calloc(1, dataSize + 1);
     if (request->response.payload == NULL) {
         return NABTO_COAP_ERROR_OUT_OF_MEMORY;
     }
@@ -641,9 +645,9 @@ uint16_t nabto_coap_server_next_message_id(struct nabto_coap_server_requests* re
     return requests->messageId;
 }
 
-struct nabto_coap_router_node* nabto_coap_router_node_new()
+struct nabto_coap_router_node* nabto_coap_router_node_new(struct nabto_coap_server* server)
 {
-    struct nabto_coap_router_node* node = calloc(1, sizeof(struct nabto_coap_router_node));
+    struct nabto_coap_router_node* node = server->allocator.calloc(1, sizeof(struct nabto_coap_router_node));
     if (node == NULL) {
         return NULL;
     }
@@ -652,33 +656,33 @@ struct nabto_coap_router_node* nabto_coap_router_node_new()
     return node;
 }
 
-void nabto_coap_router_node_free(struct nabto_coap_router_node* node)
+void nabto_coap_router_node_free(struct nabto_coap_server* server, struct nabto_coap_router_node* node)
 {
     if (node->parameter.name != NULL) {
-        nabto_coap_router_node_free(node->parameter.node);
-        free(node->parameter.name);
+        nabto_coap_router_node_free(server, node->parameter.node);
+        server->allocator.free(node->parameter.name);
     }
 
     struct nabto_coap_router_path_segment* iterator = node->pathSegmentsSentinel.next;
     while (iterator != &node->pathSegmentsSentinel) {
         struct nabto_coap_router_path_segment* current = iterator;
         iterator = iterator->next;
-        nabto_coap_router_node_free(current->node);
-        free(current->segment);
-        free(current);
+        nabto_coap_router_node_free(server, current->node);
+        server->allocator.free(current->segment);
+        server->allocator.free(current);
     }
 
-    free(node);
+    server->allocator.free(node);
 }
 
-struct nabto_coap_router_path_segment* nabto_coap_router_path_segment_new()
+struct nabto_coap_router_path_segment* nabto_coap_router_path_segment_new(struct nabto_coap_server* server)
 {
-    struct nabto_coap_router_path_segment* segment = calloc(1, sizeof(struct nabto_coap_router_path_segment));
+    struct nabto_coap_router_path_segment* segment = server->allocator.calloc(1, sizeof(struct nabto_coap_router_path_segment));
     return segment;
 }
 
 
-void nabto_coap_router_path_segment_free(struct nabto_coap_router_path_segment* segment)
+void nabto_coap_router_path_segment_free(struct nabto_coap_server* server, struct nabto_coap_router_path_segment* segment)
 {
-    free(segment);
+    server->allocator.free(segment);
 }

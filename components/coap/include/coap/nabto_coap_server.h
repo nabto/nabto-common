@@ -1,6 +1,8 @@
 #ifndef _NABTO_COAP_SERVER_H_
 #define _NABTO_COAP_SERVER_H_
 
+#include <nn/allocator.h>
+
 #include "nabto_coap.h"
 #include <stdint.h>
 #include <string.h>
@@ -26,6 +28,7 @@ struct nabto_coap_server_response;
 struct nabto_coap_server_resource;
 
 struct nabto_coap_server {
+    struct nn_allocator allocator;
     struct nabto_coap_router_node* root;
     uint32_t ackTimeout;
 };
@@ -65,7 +68,7 @@ struct nabto_coap_server_requests {
     size_t activeRequests;
 };
 
-nabto_coap_error nabto_coap_server_init(struct nabto_coap_server* server);
+nabto_coap_error nabto_coap_server_init(struct nabto_coap_server* server, struct nn_allocator* allocator);
 
 nabto_coap_error nabto_coap_server_requests_init(struct nabto_coap_server_requests* requests, struct nabto_coap_server* server, nabto_coap_get_stamp getStamp, nabto_coap_notify_event notifyEvent, void* userData);
 

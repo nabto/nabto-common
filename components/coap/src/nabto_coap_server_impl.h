@@ -121,17 +121,17 @@ void nabto_coap_server_free_request(struct nabto_coap_server_request* request);
 
 uint16_t nabto_coap_server_next_message_id(struct nabto_coap_server_requests* requests);
 
-struct nabto_coap_router_node* nabto_coap_router_node_new();
-void nabto_coap_router_node_free(struct nabto_coap_router_node* node);
+struct nabto_coap_router_node* nabto_coap_router_node_new(struct nabto_coap_server* server);
+void nabto_coap_router_node_free(struct nabto_coap_server* server, struct nabto_coap_router_node* node);
 
-struct nabto_coap_router_path_segment* nabto_coap_router_path_segment_new();
-void nabto_coap_router_path_segment_free(struct nabto_coap_router_path_segment* segment);
+struct nabto_coap_router_path_segment* nabto_coap_router_path_segment_new(struct nabto_coap_server* server);
+void nabto_coap_router_path_segment_free(struct nabto_coap_server* server, struct nabto_coap_router_path_segment* segment);
 
-nabto_coap_error nabto_coap_server_add_resource_into_tree(struct nabto_coap_router_node* parent, nabto_coap_code method, const char** path, nabto_coap_server_resource_handler handler, void* userData, struct nabto_coap_server_resource** resource);
+nabto_coap_error nabto_coap_server_add_resource_into_tree(struct nabto_coap_server* server, struct nabto_coap_router_node* parent, nabto_coap_code method, const char** path, nabto_coap_server_resource_handler handler, void* userData, struct nabto_coap_server_resource** resource);
 
 struct nabto_coap_router_path_segment* nabto_coap_server_find_path_segment(struct nabto_coap_router_node* node, const char* segment, size_t segmentLength);
 
-struct nabto_coap_server_request_parameter* nabto_coap_server_request_parameter_new();
+struct nabto_coap_server_request_parameter* nabto_coap_server_request_parameter_new(struct nabto_coap_server* server);
 
 #ifdef __cplusplus
 } // extern "C"

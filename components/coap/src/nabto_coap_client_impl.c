@@ -603,6 +603,7 @@ void nabto_coap_client_request_cancel(struct nabto_coap_client_request* request)
 
 
 void nabto_coap_client_response_free(struct nabto_coap_client_response* response) {
+    struct nabto_coap_client* client = response->request->client;
     if (response->payloadLength != 0) {
         client->allocator.free(response->payload);
     }
@@ -614,6 +615,7 @@ void nabto_coap_client_response_free(struct nabto_coap_client_response* response
  */
 void nabto_coap_client_request_free(struct nabto_coap_client_request* request)
 {
+    struct nabto_coap_client* client = request->client;
     if (request->response != NULL) {
         nabto_coap_client_response_free(request->response);
     }
@@ -638,6 +640,7 @@ void nabto_coap_client_request_set_content_format(struct nabto_coap_client_reque
 
 nabto_coap_error nabto_coap_client_request_set_payload(struct nabto_coap_client_request* request, void* payload, size_t payloadLength)
 {
+    struct nabto_coap_client* client = request->client;
     if (request->payloadLength > 0) {
         return NABTO_COAP_ERROR_INVALID_PARAMETER;
     }
