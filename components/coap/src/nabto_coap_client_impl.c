@@ -1,7 +1,5 @@
 #include "nabto_coap_client_impl.h"
 
-#include <stdlib.h>
-
 static void nabto_coap_client_next_token(struct nabto_coap_client* client, nabto_coap_token* tokenOut);
 static struct nabto_coap_client_request* nabto_coap_client_find_request(struct nabto_coap_client* client, struct nabto_coap_incoming_message* message, void* connection);
 
@@ -16,9 +14,10 @@ static uint16_t nabto_coap_client_next_message_id(struct nabto_coap_client* clie
  * Implementation of functions used from the coap client integrator *
  ********************************************************************/
 
-nabto_coap_error nabto_coap_client_init(struct nabto_coap_client* client, nabto_coap_notify_event notifyEvent, void* userData)
+nabto_coap_error nabto_coap_client_init(struct nabto_coap_client* client, struct nn_allocator* allocator, nabto_coap_notify_event notifyEvent, void* userData)
 {
     memset(client, 0, sizeof(struct nabto_coap_client));
+    client->allocator = *allocator;
     client->settings.ackTimeoutMilliseconds = 2000;
     client->settings.maxRetransmits = 6;
     client->messageIdCounter = 0;
@@ -26,7 +25,7 @@ nabto_coap_error nabto_coap_client_init(struct nabto_coap_client* client, nabto_
     client->notifyEvent = notifyEvent;
     client->userData = userData;
 
-    client->requestsSentinel = calloc(1, sizeof(struct nabto_coap_client_request));
+    client->requestsSentinel = client->allocator.calloc(1, sizeof(struct nabto_coap_client_request));
     if (client->requestsSentinel == NULL) {
         return NABTO_COAP_ERROR_OUT_OF_MEMORY;
     }
@@ -37,7 +36,7 @@ nabto_coap_error nabto_coap_client_init(struct nabto_coap_client* client, nabto_
 
 void nabto_coap_client_destroy(struct nabto_coap_client* client)
 {
-    free(client->requestsSentinel);
+    client->allocator.free(client->requestsSentinel);
     client->requestsSentinel = NULL;
 }
 
@@ -124,7 +123,7 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
     struct nabto_coap_client_response* response = request->response;
     struct nabto_coap_client* client = request->client;
     if (response == NULL) {
-        response = calloc(1, sizeof(struct nabto_coap_client_response));
+        response = client->allocator.calloc(1, sizeof(struct nabto_coap_client_response));
         if (response == NULL) {
             return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
         }
@@ -143,23 +142,23 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
     if (message->hasBlock2) {
         size_t offset = NABTO_COAP_BLOCK_OFFSET(message->block2);
         if (offset != response->payloadLength) {
-            free(response);
+            client->allocator.free(response);
             return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
         }
 
         if (NABTO_COAP_BLOCK_MORE(message->block2) && message->payloadLength != NABTO_COAP_BLOCK_SIZE_ABSOLUTE(message->block2)) {
-            free(response);
+            client->allocator.free(response);
             return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
         }
 
-        void* payload = calloc(1, (response->payloadLength + message->payloadLength + 1));
+        void* payload = client->allocator.calloc(1, (response->payloadLength + message->payloadLength + 1));
         if (!payload) {
-            free(response);
+            client->allocator.free(response);
             return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
         }
         if (response->payload) {
             memcpy(payload, response->payload, response->payloadLength);
-            free(response->payload);
+            client->allocator.free(response->payload);
         }
         memcpy((uint8_t*)payload + response->payloadLength, message->payload, message->payloadLength);
         response->payload = payload;
@@ -169,9 +168,9 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
         request->block2 = ((NABTO_COAP_BLOCK_NUM(message->block2) + 1) << 4) + (NABTO_COAP_BLOCK_SIZE(message->block2));
     } else {
         if (message->payloadLength > 0) {
-            response->payload = (uint8_t*)calloc(1, message->payloadLength + 1);
+            response->payload = (uint8_t*)client->allocator.calloc(1, message->payloadLength + 1);
             if (response->payload == NULL) {
-                free(response);
+                client->allocator.free(response);
                 return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
             }
             memcpy(response->payload, message->payload, message->payloadLength);
@@ -545,7 +544,7 @@ void nabto_coap_client_stop(struct nabto_coap_client* client)
 
 struct nabto_coap_client_request* nabto_coap_client_request_new(struct nabto_coap_client* client, nabto_coap_method method, size_t pathSegmentsLength, const char** pathSegments, nabto_coap_client_request_end_handler endHandler, void* endHandlerUserData, void* connection)
 {
-    struct nabto_coap_client_request* request = calloc(1, sizeof(struct nabto_coap_client_request));
+    struct nabto_coap_client_request* request = client->allocator.calloc(1, sizeof(struct nabto_coap_client_request));
     if (request == NULL) {
         return NULL;
     }
@@ -605,9 +604,9 @@ void nabto_coap_client_request_cancel(struct nabto_coap_client_request* request)
 
 void nabto_coap_client_response_free(struct nabto_coap_client_response* response) {
     if (response->payloadLength != 0) {
-        free(response->payload);
+        client->allocator.free(response->payload);
     }
-    free(response);
+    client->allocator.free(response);
 }
 
 /**
@@ -622,10 +621,10 @@ void nabto_coap_client_request_free(struct nabto_coap_client_request* request)
     nabto_coap_client_remove_request_from_list(request);
 
     if (request->payloadLength) {
-        free(request->payload);
+        client->allocator.free(request->payload);
     }
 
-    free(request);
+    client->allocator.free(request);
 }
 
 /**
@@ -645,7 +644,7 @@ nabto_coap_error nabto_coap_client_request_set_payload(struct nabto_coap_client_
     if (payloadLength == 0) {
         return NABTO_COAP_ERROR_OK;
     }
-    request->payload = calloc(1, payloadLength);
+    request->payload = client->allocator.calloc(1, payloadLength);
     if (request->payload == NULL) {
         return NABTO_COAP_ERROR_OUT_OF_MEMORY;
     }
