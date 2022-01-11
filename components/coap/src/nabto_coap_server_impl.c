@@ -5,9 +5,10 @@
 
 const char* unhandledRequest = "Request unhandled";
 
-nabto_coap_error nabto_coap_server_init(struct nabto_coap_server* server, struct nn_allocator* allocator)
+nabto_coap_error nabto_coap_server_init(struct nabto_coap_server* server, struct nn_log* logger, struct nn_allocator* allocator)
 {
     memset(server, 0, sizeof(struct nabto_coap_server));
+    server->logger = logger;
     server->allocator = *allocator;
     server->ackTimeout = NABTO_COAP_ACK_TIMEOUT;
 
