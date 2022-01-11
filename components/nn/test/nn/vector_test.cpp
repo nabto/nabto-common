@@ -1,13 +1,19 @@
 #include <boost/test/unit_test.hpp>
 
 #include <nn/vector.h>
+#include <nn/allocator.h>
+
+static struct nn_allocator defaultAllocator = {
+    .calloc = &calloc,
+    .free = &free
+};
 
 BOOST_AUTO_TEST_SUITE(vector)
 
 BOOST_AUTO_TEST_CASE(init)
 {
     struct nn_vector vector;
-    nn_vector_init(&vector, sizeof(void*));
+    nn_vector_init(&vector, sizeof(void*), &defaultAllocator);
 
     char* foo = strdup("foo");
 
@@ -29,7 +35,7 @@ BOOST_AUTO_TEST_CASE(init)
 BOOST_AUTO_TEST_CASE(erase)
 {
     struct nn_vector vector;
-    nn_vector_init(&vector, sizeof(int));
+    nn_vector_init(&vector, sizeof(int), &defaultAllocator);
 
     int foo = 42;
     int bar = 43;
@@ -57,7 +63,7 @@ BOOST_AUTO_TEST_CASE(erase)
 BOOST_AUTO_TEST_CASE(iterator)
 {
     struct nn_vector vector;
-    nn_vector_init(&vector, sizeof(int));
+    nn_vector_init(&vector, sizeof(int), &defaultAllocator);
 
     int foo = 42;
 
@@ -84,7 +90,7 @@ BOOST_AUTO_TEST_CASE(larger_elements)
 {
 
     struct nn_vector vector;
-    nn_vector_init(&vector, sizeof(struct large_element));
+    nn_vector_init(&vector, sizeof(struct large_element), &defaultAllocator);
 
     struct large_element foo;
     memset(foo.block, 42, BLOCK_SIZE);

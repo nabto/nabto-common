@@ -133,7 +133,7 @@ void nabto_coap_server_make_error_response(struct nabto_coap_server_requests* re
 
 void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests* requests, struct nabto_coap_server_request* request, struct nabto_coap_incoming_message* message)
 {
-
+    struct nabto_coap_server* server = requests->server;
     bool block1Done = true;
 
     if (message->hasBlock1) {
@@ -157,7 +157,7 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests
                 return;
             }
         }
-        void* newPayload = calloc(1, request->payloadLength + message->payloadLength + 1);
+        void* newPayload = server->allocator.calloc(1, request->payloadLength + message->payloadLength + 1);
         if (!newPayload) {
             nabto_coap_server_make_error_response(requests, request->connection, message, NABTO_COAP_CODE_SERVICE_UNAVAILABLE, outOfResources);
             // User will never see this request, so we free for him
@@ -191,7 +191,7 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests
             if (request->payload != NULL) {
                 free(request->payload);
             }
-            request->payload = calloc(1, message->payloadLength+1);
+            request->payload = server->allocator.calloc(1, message->payloadLength+1);
             if (request->payload == NULL) {
                 request->isFreed = true;
                 request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
@@ -368,13 +368,13 @@ struct nabto_coap_server_resource* nabto_coap_server_find_resource(struct nabto_
             // test if currentNode has a parameter
             if (currentNode->parameter.name != NULL) {
                 if (parameters != NULL) {
-                    struct nabto_coap_server_request_parameter* parameter = nabto_coap_server_request_parameter_new();
+                    struct nabto_coap_server_request_parameter* parameter = nabto_coap_server_request_parameter_new(server);
                     if (parameter == NULL) {
                         // calloc failed, return NULL to signal this. This only happens if we already found the resource in a previous call with parameters == NULL, so it is possible to return meaningfull error.
                         return NULL;
                     }
                     parameter->parameter = &currentNode->parameter;
-                    parameter->value = calloc(1, optionLength + 1);
+                    parameter->value = server->allocator.calloc(1, optionLength + 1);
                     if (parameter->value == NULL) {
                         // calloc failed, return NULL to signal this. This only happens if we already found the resource in a previous call with parameters == NULL, so it is possible to return meaningfull error.
                         free(parameter);
@@ -414,7 +414,8 @@ struct nabto_coap_server_resource* nabto_coap_server_find_resource(struct nabto_
 
 struct nabto_coap_server_request* nabto_coap_server_request_new(struct nabto_coap_server_requests* requests)
 {
-    struct nabto_coap_server_request* request = calloc(1, sizeof(struct nabto_coap_server_request));
+    struct nabto_coap_server* server = requests->server;
+    struct nabto_coap_server_request* request = server->allocator.calloc(1, sizeof(struct nabto_coap_server_request));
     if (request == NULL) {
         return NULL;
     }
@@ -431,7 +432,7 @@ struct nabto_coap_server_request* nabto_coap_server_request_new(struct nabto_coa
 }
 
 
-struct nabto_coap_server_request_parameter* nabto_coap_server_request_parameter_new()
+struct nabto_coap_server_request_parameter* nabto_coap_server_request_parameter_new(struct nabto_coap_server* server)
 {
-    return (struct nabto_coap_server_request_parameter*)calloc(1, sizeof(struct nabto_coap_server_request_parameter));
+    return (struct nabto_coap_server_request_parameter*)server->allocator.calloc(1, sizeof(struct nabto_coap_server_request_parameter));
 }

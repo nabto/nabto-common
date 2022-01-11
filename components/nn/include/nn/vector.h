@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
+#include "allocator.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -14,6 +16,7 @@ struct nn_vector {
     size_t capacity;
     size_t used;
     size_t itemSize;
+    struct nn_allocator allocator;
 };
 
 struct nn_vector_iterator {
@@ -22,7 +25,7 @@ struct nn_vector_iterator {
 };
 
 
-void nn_vector_init(struct nn_vector* vector, size_t itemSize);
+void nn_vector_init(struct nn_vector* vector, size_t itemSize, struct nn_allocator* allocator);
 void nn_vector_deinit(struct nn_vector* vector);
 
 /**

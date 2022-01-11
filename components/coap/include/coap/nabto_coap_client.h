@@ -5,6 +5,8 @@
 #include "stdbool.h"
 #include "nabto_coap.h"
 
+#include <nn/allocator.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -43,6 +45,7 @@ typedef void (*nabto_coap_client_request_end_handler)(struct nabto_coap_client_r
 
 struct nabto_coap_client {
     struct nabto_coap_client_settings settings;
+    struct nn_allocator allocator;
     // list of requests in the client
     struct nabto_coap_client_request* requestsSentinel;
     uint16_t messageIdCounter;
@@ -141,7 +144,7 @@ bool nabto_coap_client_response_get_payload(struct nabto_coap_client_response* r
  * called from the module implementation *
  *****************************************/
 
-nabto_coap_error nabto_coap_client_init(struct nabto_coap_client* client, nabto_coap_notify_event notifyEvent, void* userData);
+nabto_coap_error nabto_coap_client_init(struct nabto_coap_client* client, struct nn_allocator* allocator, nabto_coap_notify_event notifyEvent, void* userData);
 
 void nabto_coap_client_destroy(struct nabto_coap_client* client);
 

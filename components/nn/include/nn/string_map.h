@@ -6,6 +6,7 @@
  */
 
 #include <nn/llist.h>
+#include <nn/allocator.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,6 +20,7 @@ struct nn_string_map_item {
 
 struct nn_string_map {
     struct nn_llist items;
+    struct nn_allocator allocator;
 };
 
 struct nn_string_map_iterator {
@@ -28,7 +30,7 @@ struct nn_string_map_iterator {
 /**
  * Initialize a string map
  */
-void nn_string_map_init(struct nn_string_map* map);
+void nn_string_map_init(struct nn_string_map* map, struct nn_allocator* allocator);
 
 /**
  * Deinitialize a string map

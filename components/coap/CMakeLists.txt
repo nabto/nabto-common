@@ -7,5 +7,7 @@ set(src
   )
 
 add_library(coap ${src})
+target_link_libraries(coap nn)
+
 
 target_include_directories(coap PUBLIC include)

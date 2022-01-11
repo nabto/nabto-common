@@ -2,12 +2,17 @@
 
 #include <nn/string_map.h>
 
+static struct nn_allocator defaultAllocator = {
+    .calloc = &calloc,
+    .free = &free
+};
+
 BOOST_AUTO_TEST_SUITE(string_map)
 
 BOOST_AUTO_TEST_CASE(basic)
 {
     struct nn_string_map map;
-    nn_string_map_init(&map);
+    nn_string_map_init(&map, &defaultAllocator);
 
     struct nn_string_map_iterator it = nn_string_map_insert(&map, "key", "value");
 
@@ -26,7 +31,7 @@ BOOST_AUTO_TEST_CASE(basic)
 BOOST_AUTO_TEST_CASE(erase)
 {
     struct nn_string_map map;
-    nn_string_map_init(&map);
+    nn_string_map_init(&map, &defaultAllocator);
 
     struct nn_string_map_iterator it1 = nn_string_map_insert(&map, "key", "value");
     struct nn_string_map_iterator it2 = nn_string_map_insert(&map, "key2", "value2");
