@@ -52,6 +52,7 @@ void nabto_coap_server_requests_destroy(struct nabto_coap_server_requests* reque
         struct nabto_coap_server_request* current = iterator;
         iterator = iterator->next;
         current->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
+        current->isFreed = true;
         nabto_coap_server_free_request(current);
     }
     server->allocator.free(requests->requestsSentinel);
