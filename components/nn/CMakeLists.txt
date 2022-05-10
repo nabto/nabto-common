@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.2)
 project(nn)
 
 set(src
+    src/nn/endian.c
     src/nn/vector.c
     src/nn/string_set.c
     src/nn/log.c
