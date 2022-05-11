@@ -2,6 +2,7 @@
 #include "nabto_coap_server_impl.h"
 
 #include <stdlib.h>
+#include <nn/string.h>
 
 const char* unhandledRequest = "Request unhandled";
 
@@ -490,7 +491,7 @@ nabto_coap_error nabto_coap_server_add_resource_into_tree(struct nabto_coap_serv
                 if (pathSegment == NULL) {
                     return NABTO_COAP_ERROR_OUT_OF_MEMORY;
                 }
-                pathSegment->segment = strdup(segment);
+                pathSegment->segment = nn_strdup(segment, &server->allocator);
                 if (pathSegment->segment == NULL) {
                     server->allocator.free(pathSegment);
                     return NABTO_COAP_ERROR_OUT_OF_MEMORY;
