@@ -12,6 +12,7 @@ find_package(
   REQUIRED)
 
 set(test_src
+    ${test_dir}/nn/endian_test.cpp
     ${test_dir}/nn/vector_test.cpp
     ${test_dir}/nn/string_set_test.cpp
     ${test_dir}/nn/log_test.cpp
