@@ -169,7 +169,7 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests
 
         if (request->payloadLength > 0) {
             memcpy(newPayload, request->payload, request->payloadLength);
-            free(request->payload);
+            server->allocator.free(request->payload);
         }
         memcpy((uint8_t*)newPayload+request->payloadLength, message->payload, message->payloadLength);
         request->payload = newPayload;
@@ -189,7 +189,7 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests
     } else {
         if (message->payload && message->payloadLength) {
             if (request->payload != NULL) {
-                free(request->payload);
+                server->allocator.free(request->payload);
             }
             request->payload = server->allocator.calloc(1, message->payloadLength+1);
             if (request->payload == NULL) {
@@ -377,7 +377,7 @@ struct nabto_coap_server_resource* nabto_coap_server_find_resource(struct nabto_
                     parameter->value = server->allocator.calloc(1, optionLength + 1);
                     if (parameter->value == NULL) {
                         // calloc failed, return NULL to signal this. This only happens if we already found the resource in a previous call with parameters == NULL, so it is possible to return meaningfull error.
-                        free(parameter);
+                        server->allocator.free(parameter);
                         return NULL;
                     }
                     memcpy(parameter->value, iterator->optionDataBegin, optionLength);
