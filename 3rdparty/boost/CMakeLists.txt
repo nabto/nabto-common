@@ -1,5 +1,7 @@
 find_package( Threads )
 
+find_library(HAVE_ATOMIC_LIB atomic)
+
 set(src_dir ${CMAKE_CURRENT_SOURCE_DIR}/generated)
 
 include_directories(${src_dir})
@@ -33,6 +35,11 @@ set(boost_timer_src
 
 add_library(3rdparty_boost_system INTERFACE)
 target_include_directories(3rdparty_boost_system INTERFACE ${src_dir})
+if (HAVE_ATOMIC_LIB)
+  # for raspberry pi
+  target_link_libraries(3rdparty_boost_system INTERFACE atomic)
+endif()
+
 
 add_library(3rdparty_boost_test STATIC "${boost_test_src}")
 target_include_directories(3rdparty_boost_system INTERFACE ${src_dir})
@@ -49,6 +56,11 @@ add_library(3rdparty_boost_asio INTERFACE)
 target_include_directories(3rdparty_boost_asio INTERFACE ${src_dir})
 target_link_libraries(3rdparty_boost_asio INTERFACE 3rdparty_boost_system ${CMAKE_THREAD_LIBS_INIT})
 target_compile_definitions(3rdparty_boost_asio INTERFACE -DBOOST_ASIO_DISABLE_BOOST_REGEX=1)
+if (HAVE_ATOMIC_LIB)
+  # for raspberry pi
+  target_link_libraries(3rdparty_boost_asio INTERFACE atomic)
+endif()
+
 
 
 add_library(3rdparty_boost_beast INTERFACE)
