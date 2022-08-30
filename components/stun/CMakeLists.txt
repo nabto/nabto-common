@@ -2,7 +2,9 @@ cmake_minimum_required(VERSION 3.10)
 project(nabto_stun)
 option(STUN_BUILD_TESTS "build stun test program" OFF)
 
-add_compile_options(-Wall -Wextra -pedantic)
+if (UNIX)
+  add_compile_options(-Wall -Wextra -pedantic)
+endif()
 
 set(src
   src/nabto_stun_client.c
