@@ -182,7 +182,6 @@ bool nabto_stun_decode_message(struct nabto_stun_message* msg, const uint8_t* bu
         }
 
         const uint8_t* attPtr = ptr;
-        const uint8_t* attEnd = ptr + attLen;
 
 
         if ( attType == STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS_ALT || attType == STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS) {
