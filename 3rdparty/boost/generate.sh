@@ -4,15 +4,15 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 tmp_dir=$(mktemp -d -t ci-XXXXXXXXXX)
 
-BOOST_URL=https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.gz
+BOOST_URL=https://boostorg.jfrog.io/artifactory/main/release/1.80.0/source/boost_1_80_0.tar.gz
 
 cd $tmp_dir
 
 wget $BOOST_URL
 
-tar xf boost_1_72_0.tar.gz
+tar xf boost_1_80_0.tar.gz
 
-cd boost_1_72_0
+cd boost_1_80_0
 
 ./bootstrap.sh
 ./b2 -j 8 tools/bcp
