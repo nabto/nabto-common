@@ -52,13 +52,15 @@ void nn_log_trace_adapter(struct nn_log* logger, const char* module, const char*
 }
 
 #else
-void nn_log_adapter(struct nn_log* logger, enum nn_log_severity severity, const char* module, const char* file, int line, const char* fmt, ...)
+void nn_log_adapter(struct nn_log* logger, enum nn_log_severity severity, const char* module, const char* file, int line, ...)
 {
     if (logger == NULL) {
         return;
     }
     va_list args;
-    va_start(args, fmt);
+
+    va_start(args, line);
+    const char* fmt = va_arg(args, const char*);
     logger->logPrint(logger->userData, severity, module, file, line, fmt, args);
     va_end(args);
 }

@@ -72,29 +72,27 @@ void nn_log_trace_adapter(struct nn_log* logger, const char* module, const char*
 /**
  * Internal adapter for chaning the macto to varargs
  */
-void nn_log_adapter(struct nn_log* logger, enum nn_log_severity severity, const char* module, const char* file, int line, const char* fmt, ...);
-
-#define VA_ARGS(...) , ##__VA_ARGS__
+void nn_log_adapter(struct nn_log* logger, enum nn_log_severity severity, const char* module, const char* file, int line, ...);
 
 #ifndef NN_LOG_ERROR
-#define NN_LOG_ERROR(logger, module, fmt, ...) do { nn_log_adapter(logger, NN_LOG_SEVERITY_ERROR, module, __FILE__, __LINE__, fmt VA_ARGS(__VA_ARGS__)); } while (0)
+#define NN_LOG_ERROR(logger, module, ...) do { nn_log_adapter(logger, NN_LOG_SEVERITY_ERROR, module, __FILE__, __LINE__, __VA_ARGS__); } while (0)
 #endif
 
 #ifndef NN_LOG_WARN
-#define NN_LOG_WARN(logger, module, fmt, ...) do { nn_log_adapter(logger, NN_LOG_SEVERITY_WARN, module, __FILE__, __LINE__, fmt VA_ARGS(__VA_ARGS__)); } while (0)
+#define NN_LOG_WARN(logger, module, ...) do { nn_log_adapter(logger, NN_LOG_SEVERITY_WARN, module, __FILE__, __LINE__, __VA_ARGS__); } while (0)
 #endif
 
 #ifndef NN_LOG_INFO
-#define NN_LOG_INFO(logger, module, fmt, ...) do { nn_log_adapter(logger, NN_LOG_SEVERITY_INFO, module, __FILE__, __LINE__, fmt VA_ARGS(__VA_ARGS__)); } while (0)
+#define NN_LOG_INFO(logger, module, ...) do { nn_log_adapter(logger, NN_LOG_SEVERITY_INFO, module, __FILE__, __LINE__, __VA_ARGS__); } while (0)
 #endif
 
 #ifndef NN_LOG_TRACE
-#define NN_LOG_TRACE(logger, module, fmt, ...) do { nn_log_adapter(logger, NN_LOG_SEVERITY_TRACE, module, __FILE__, __LINE__, fmt VA_ARGS(__VA_ARGS__)); } while (0)
+#define NN_LOG_TRACE(logger, module, ...) do { nn_log_adapter(logger, NN_LOG_SEVERITY_TRACE, module, __FILE__, __LINE__, __VA_ARGS__); } while (0)
 #endif
 
 // RAW is used for 3rdparty library logging where the library log parameters should be passed through
 #ifndef NN_LOG_RAW
-#define NN_LOG_RAW(logger, severity, module, line, file, fmt, ...) do { nn_log_adapter(logger, severity, module, file, line, fmt VA_ARGS(__VA_ARGS__)); } while(0)
+#define NN_LOG_RAW(logger, severity, module, line, file, ...) do { nn_log_adapter(logger, severity, module, file, line, __VA_ARGS__); } while(0)
 #endif
 
 #endif
