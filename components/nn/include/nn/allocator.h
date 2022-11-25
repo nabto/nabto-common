@@ -16,6 +16,9 @@ struct nn_allocator {
     nn_free free;
 };
 
+void* nn_allocator_calloc(struct nn_allocator* allocator, size_t n, size_t size);
+void nn_allocator_free(struct nn_allocator* allocator, void* ptr);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
