@@ -36,7 +36,8 @@ nabto_coap_error nabto_coap_client_init(struct nabto_coap_client* client, struct
 
 void nabto_coap_client_destroy(struct nabto_coap_client* client)
 {
-    client->allocator.free(client->requestsSentinel);
+    nn_allocator_free(&client->allocator, client->requestsSentinel);
+    //client->allocator.free(client->requestsSentinel);
     client->requestsSentinel = NULL;
 }
 

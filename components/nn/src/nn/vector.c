@@ -13,7 +13,7 @@ void nn_vector_init(struct nn_vector* vector, size_t itemSize, struct nn_allocat
 
 void nn_vector_deinit(struct nn_vector* vector)
 {
-    vector->allocator.free(vector->elements);
+    nn_allocator_free(&vector->allocator, vector->elements);
     vector->elements = NULL;
     vector->capacity = 0;
     vector->used = 0;
