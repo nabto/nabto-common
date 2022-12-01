@@ -45,6 +45,10 @@ nabto_coap_error nabto_coap_server_requests_init(struct nabto_coap_server_reques
     return NABTO_COAP_ERROR_OK;
 }
 
+/**
+ * This function should be called after the user of the library has freed all
+ * their coap server requests which they have references to.
+ */
 void nabto_coap_server_requests_destroy(struct nabto_coap_server_requests* requests)
 {
     struct nabto_coap_server* server = requests->server;
@@ -54,6 +58,9 @@ void nabto_coap_server_requests_destroy(struct nabto_coap_server_requests* reque
         iterator = iterator->next;
         if (current->state == NABTO_COAP_SERVER_REQUEST_STATE_REQUEST) {
             current->isFreed = true;
+        } else if (current->isFreed == false) {
+            // A request is still owned by the user application. When the
+            // application calls free on the request, bad things happens.
         }
         current->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
         nabto_coap_server_free_request(current);
