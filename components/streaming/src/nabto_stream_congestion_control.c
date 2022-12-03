@@ -72,11 +72,16 @@ void nabto_stream_congestion_control_handle_ack(struct nabto_stream* stream, str
 
     if (nabto_stream_congestion_control_use_slow_start(stream)) {
         NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "slow starting! %f", stream->cCtrl.cwnd);
-        stream->cCtrl.cwnd += 2;
+        // Avoid the congestion window goes way above any reasonably large value. Limit it by the current flight size.
+        if (stream->cCtrl.cwnd < stream->cCtrl.flightSize * 2) {
+            stream->cCtrl.cwnd += 2;
+        }
     } else {
         // congestion avoidance
         // flight size is never 0
-        stream->cCtrl.cwnd += 1 + (1.0/stream->cCtrl.flightSize);
+        if (stream->cCtrl.cwnd < stream->cCtrl.flightSize * 2) {
+            stream->cCtrl.cwnd += 1 + (1.0/stream->cCtrl.flightSize);
+        }
     }
 
     /**
