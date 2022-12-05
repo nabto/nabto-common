@@ -17,6 +17,7 @@ void nabto_stream_congestion_control_init(struct nabto_stream* stream)
 {
     stream->cCtrl.isFirstAck = true;
     stream->cCtrl.cwnd = NABTO_STREAM_CWND_INITIAL_VALUE;
+    stream->cCtrl.cwndMax = NABTO_STREAM_CWND_INITIAL_VALUE;
     stream->cCtrl.srtt = NABTO_STREAM_DEFAULT_TIMEOUT;
     stream->cCtrl.rto =  NABTO_STREAM_DEFAULT_TIMEOUT;
     stream->cCtrl.ssThreshold = NABTO_STREAM_SLOW_START_INITIAL_VALUE;
@@ -25,6 +26,7 @@ void nabto_stream_congestion_control_init(struct nabto_stream* stream)
 void nabto_stream_congestion_control_adjust_ssthresh_after_triple_ack(struct nabto_stream* stream, struct nabto_stream_send_segment* segment) {
     if (!stream->cCtrl.lostSegment) {
         stream->cCtrl.ssThreshold = (uint32_t)NABTO_STREAM_MAX(stream->cCtrl.flightSize/2.0, NABTO_STREAM_SLOW_START_MIN_VALUE);
+        stream->cCtrl.cwndMax = stream->cCtrl.ssThreshold * 2;
         NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "Setting ssThreshold: %" NN_LOG_PRIu32 ", flightSize: %" NN_LOG_PRIu32, stream->cCtrl.ssThreshold, stream->cCtrl.flightSize);
         nabto_stream_stats_observe(&stream->ccStats.ssThreshold, stream->cCtrl.ssThreshold);
         stream->cCtrl.lostSegment = true;
@@ -43,6 +45,7 @@ void nabto_stream_congestion_control_timeout(struct nabto_stream* stream) {
 
     // After a timeout start with a fresh slow start
     stream->cCtrl.cwnd = NABTO_STREAM_CWND_INITIAL_VALUE;
+    stream->cCtrl.cwndMax = NABTO_STREAM_CWND_INITIAL_VALUE;
     stream->cCtrl.ssThreshold = NABTO_STREAM_SLOW_START_INITIAL_VALUE;
 
     // A problem with karns algorithm is that a huge increase
@@ -73,16 +76,12 @@ void nabto_stream_congestion_control_handle_ack(struct nabto_stream* stream, str
     if (nabto_stream_congestion_control_use_slow_start(stream)) {
         NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "slow starting! %f", stream->cCtrl.cwnd);
         // Avoid the congestion window goes way above any reasonably large value. Limit it by the current flight size.
-        if (stream->cCtrl.cwnd < stream->cCtrl.flightSize * 2) {
-            stream->cCtrl.cwnd += 2;
-        }
+        stream->cCtrl.cwnd += 2;
     } else {
-        // congestion avoidance
-        // flight size is never 0
-        if (stream->cCtrl.cwnd < stream->cCtrl.flightSize * 2) {
-            stream->cCtrl.cwnd += 1 + (1.0/stream->cCtrl.flightSize);
-        }
+        stream->cCtrl.cwnd += 1 + (1.0/stream->cCtrl.flightSize);
     }
+
+    stream->cCtrl.cwndMax = NABTO_STREAM_MAX(stream->cCtrl.flightSize*2, stream->cCtrl.cwndMax);
 
     /**
      * Idea, limit cwnd by flight size, such that in a case where
@@ -124,6 +123,7 @@ bool nabto_stream_congestion_control_use_slow_start(struct nabto_stream* stream)
  */
 bool nabto_stream_congestion_control_accept_more_data(struct nabto_stream* stream) {
     if (stream->sendListSize <= stream->cCtrl.cwnd &&
+        stream->sendListSize + stream->cCtrl.flightSize <= stream->cCtrl.cwndMax &&
         stream->sendListSize <= NABTO_STREAM_MAX_SEND_LIST_SIZE &&
         stream->cCtrl.flightSize <= NABTO_STREAM_MAX_FLIGHT_SIZE)
     {

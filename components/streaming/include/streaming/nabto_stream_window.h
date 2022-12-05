@@ -207,6 +207,7 @@ typedef struct {
     bool          isFirstAck;    ///< True when the first ack has not
                                  ///been received. Or after a timeout.
     double        cwnd;          ///< Tokens available for sending data
+    double        cwndMax;       ///< Max value of inflight data, this is used to limit when no more data can be written to the stream.
     uint32_t      ssThreshold;   ///< Slow start threshold
     uint32_t      flightSize;    ///< Gauge of sent but not acked buffers. Aka flight size.
     bool          lostSegment;   ///< True if a segment has been lost
