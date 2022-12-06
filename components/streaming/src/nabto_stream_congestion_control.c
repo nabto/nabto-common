@@ -78,9 +78,14 @@ void nabto_stream_congestion_control_handle_ack(struct nabto_stream* stream, str
         // Avoid the congestion window goes way above any reasonably large value. Limit it by the current flight size.
         stream->cCtrl.cwnd += 2;
     } else {
+        // Congestion avoidance. flight size is never 0 since the current acked
+        // segment is still considered inflight here.
         stream->cCtrl.cwnd += 1 + (1.0/stream->cCtrl.flightSize);
     }
 
+    // cwndMax is not a tight bound so set it to 2 times the flight size such
+    // that there is enough data for slow start and plenty of data when we are
+    // in congestion avoidance.
     stream->cCtrl.cwndMax = NABTO_STREAM_MAX(stream->cCtrl.flightSize*2, stream->cCtrl.cwndMax);
 
     /**
