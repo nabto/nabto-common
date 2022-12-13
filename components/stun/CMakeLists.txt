@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.2)
 project(nabto_stun)
 option(STUN_BUILD_TESTS "build stun test program" OFF)
 
