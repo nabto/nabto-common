@@ -304,7 +304,7 @@ void nabto_stun_set_next_test(struct nabto_stun* stun)
                 }
             }
             waitTime = stamp - stun->nextTest->stamp;
-            if (waitTime > NABTO_STUN_SEND_TIMEOUT) {
+            if (waitTime >= NABTO_STUN_SEND_TIMEOUT) {
                 if (stun->nextTest->sock == PRIMARY) {
                     stun->nextEvent = STUN_ET_SEND_PRIMARY;
                 } else {
