@@ -47,14 +47,17 @@ enum nabto_stun_next_event_type {
 };
 
 enum nabto_stun_nat_result {
+    STUN_NOT_AVAILABLE = 0x00,
     STUN_INDEPENDENT = 0x01,
     STUN_ADDR_DEPENDENT = 0x02,
     STUN_PORT_DEPENDENT = 0x03
 };
 
 struct nabto_stun_result {
+
     enum nabto_stun_nat_result mapping;
     enum nabto_stun_nat_result filtering;
+    bool hasDefectNatAnswer;
     bool defectNat;
     struct nn_endpoint extEp;
 };

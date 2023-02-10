@@ -25,6 +25,7 @@ void nabto_stun_async_analyze(struct nabto_stun* stun, bool simple)//, nabto_stu
 {
 //    stun->cb = cb;
 //    stun->cbData = data;
+    memset(&stun->result, 0, sizeof(struct nabto_stun_result));
     stun->simple = simple;
     stun->nextEvent = STUN_ET_SEND_PRIMARY;
     stun->state = STUN_INITIAL_TEST;
@@ -119,12 +120,16 @@ void nabto_stun_compute_result_and_stop(struct nabto_stun* stun)
         stun->result.filtering = STUN_PORT_DEPENDENT;
     }
 
+    stun->result.hasDefectNatAnswer = false;
     stun->result.defectNat = false;
-    if (stun->defectRouterTest.state == COMPLETED &&
-        stun->result.mapping == STUN_INDEPENDENT &&
-        (stun->defectRouterTest.mappedEp.port != stun->tests[4].mappedEp.port))
-    {
-        stun->result.defectNat = true;
+    
+    if (stun->defectRouterTest.state == COMPLETED) {
+        stun->result.hasDefectNatAnswer = true;
+        if (stun->result.mapping == STUN_INDEPENDENT &&
+            (stun->defectRouterTest.mappedEp.port != stun->tests[4].mappedEp.port))
+        {
+            stun->result.defectNat = true;
+        }
     }
     stun->state = STUN_COMPLETED;
     stun->nextEvent = STUN_ET_COMPLETED;
@@ -304,7 +309,7 @@ void nabto_stun_set_next_test(struct nabto_stun* stun)
                 }
             }
             waitTime = stamp - stun->nextTest->stamp;
-            if (waitTime > NABTO_STUN_SEND_TIMEOUT) {
+            if (waitTime >= NABTO_STUN_SEND_TIMEOUT) {
                 if (stun->nextTest->sock == PRIMARY) {
                     stun->nextEvent = STUN_ET_SEND_PRIMARY;
                 } else {
