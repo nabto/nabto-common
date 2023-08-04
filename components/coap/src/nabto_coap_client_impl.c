@@ -144,17 +144,20 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
         size_t offset = NABTO_COAP_BLOCK_OFFSET(message->block2);
         if (offset != response->payloadLength) {
             client->allocator.free(response);
+            request->response = NULL;
             return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
         }
 
         if (NABTO_COAP_BLOCK_MORE(message->block2) && message->payloadLength != NABTO_COAP_BLOCK_SIZE_ABSOLUTE(message->block2)) {
             client->allocator.free(response);
+            request->response = NULL;
             return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
         }
 
         void* payload = client->allocator.calloc(1, (response->payloadLength + message->payloadLength + 1));
         if (!payload) {
             client->allocator.free(response);
+            request->response = NULL;
             return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
         }
         if (response->payload) {
@@ -172,6 +175,7 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
             response->payload = (uint8_t*)client->allocator.calloc(1, message->payloadLength + 1);
             if (response->payload == NULL) {
                 client->allocator.free(response);
+                request->response = NULL;
                 return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
             }
             memcpy(response->payload, message->payload, message->payloadLength);
