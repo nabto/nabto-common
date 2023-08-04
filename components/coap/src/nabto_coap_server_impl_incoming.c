@@ -228,6 +228,7 @@ void nabto_coap_server_handle_data_for_response(struct nabto_coap_server_request
         response->block2Size = NABTO_COAP_BLOCK_SIZE(message->block2);
         response->messageId = nabto_coap_server_next_message_id(requests);
         response->sendNow = true;
+        response->retransmissions = 0;
     }
 }
 
