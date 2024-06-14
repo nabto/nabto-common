@@ -442,3 +442,19 @@ uint8_t* nabto_coap_encode_varint_option(uint16_t optionDelta, const uint32_t va
     return nabto_coap_encode_option(optionDelta, encoded, encodedLength, buffer, bufferEnd);
 
 }
+
+const char* nabto_coap_error_to_string(nabto_coap_error err)
+{
+    switch (err) {
+        case NABTO_COAP_ERROR_OK:
+            return "NABTO_COAP_ERROR_OK";
+        case NABTO_COAP_ERROR_OUT_OF_MEMORY:
+            return "NABTO_COAP_ERROR_OUT_OF_MEMORY";
+        case NABTO_COAP_ERROR_NO_CONNECTION:
+            return "NABTO_COAP_ERROR_NO_CONNECTION";
+        case NABTO_COAP_ERROR_INVALID_PARAMETER:
+            return "NABTO_COAP_ERROR_INVALID_PARAMETER";
+        default:
+            return "Unknown nabto_coap_error error code";
+    }
+}
