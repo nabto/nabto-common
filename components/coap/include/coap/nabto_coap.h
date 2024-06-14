@@ -205,6 +205,8 @@ typedef void (*nabto_coap_notify_event)(void* userData);
 bool nabto_coap_parse_variable_int(const uint8_t* bufferStart, const uint8_t* bufferEnd, uint8_t maxBytes, uint32_t* result);
 bool nabto_coap_encode_variable_int(uint8_t* bufferStart, uint8_t maxBufferLength, uint32_t value, size_t* encodedLength);
 
+const char* nabto_coap_error_to_string(nabto_coap_error err);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

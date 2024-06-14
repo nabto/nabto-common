@@ -9,6 +9,7 @@ endif()
 set(src
   src/nabto_stun_client.c
   src/nabto_stun_message.c
+  src/nabto_stun_util.c
   )
 
 add_library(nabto_stun_client "${src}")

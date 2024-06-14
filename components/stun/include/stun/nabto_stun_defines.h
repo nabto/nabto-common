@@ -70,6 +70,15 @@ struct nabto_stun_module {
     bool (*get_rand)(uint8_t* buf, uint16_t size, void* userData);
 };
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+const char* nabto_stun_next_event_type_to_string(enum nabto_stun_next_event_type event);
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
 
 #endif // NABTO_STUN_DEFINES_H
