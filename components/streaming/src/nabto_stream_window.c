@@ -242,6 +242,16 @@ size_t nabto_stream_can_write(struct nabto_stream* stream)
 // called from event loop which handles inputs and timeouts.
 enum nabto_stream_next_event_type nabto_stream_next_event_to_handle(struct nabto_stream* stream)
 {
+    if (stream->sendSegmentAllocationStamp.type == NABTO_STREAM_STAMP_FUTURE) {
+        nabto_stream_allocate_next_send_segment(stream);
+    }
+    if (stream->recvSegmentAllocationStamp.type == NABTO_STREAM_STAMP_FUTURE) {
+        nabto_stream_allocate_next_recv_segment(stream);
+    }
+
+    if (stream->state == ST_IDLE) {
+        return ET_NOTHING;
+    }
     if (stream->state == ST_ACCEPT) {
         return ET_ACCEPT;
     }
@@ -772,6 +782,7 @@ void nabto_stream_handle_data(struct nabto_stream* stream, uint32_t seq, const u
 {
     NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "handle data segment: %" NN_LOG_PRIu32 " size: %" NN_LOG_PRIu16, seq, dataLength);
     if (dataLength > stream->maxRecvSegmentSize) {
+        NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "The data is larger than the max alloved segment. dataLength: %" NN_LOG_PRIu32 ", maxRecvSegmentSize: %" NN_LOG_PRIu16, dataLength, stream->maxRecvSegmentSize);
         // invalid data drop it.
         return;
     }

@@ -92,3 +92,14 @@ const char* nabto_stream_next_event_type_to_string(enum nabto_stream_next_event_
     }
     return "Not here";
 }
+
+const char* nabto_stream_module_event_to_string(enum nabto_stream_module_event moduleEvent) {
+    switch (moduleEvent) {
+        case NABTO_STREAM_MODULE_EVENT_DATA_WRITTEN: return "DATA_WRITTEN";
+        case NABTO_STREAM_MODULE_EVENT_DATA_READ: return "DATA_READ";
+        case NABTO_STREAM_MODULE_EVENT_CLOSE_CALLED: return "CLOSE_CALLED";
+        case NABTO_STREAM_MODULE_EVENT_OPENED: return "OPENED";
+        case NABTO_STREAM_MODULE_EVENT_ACCEPTED: return "ACCEPTED";
+    }
+    return "We should never reach this code";
+}
