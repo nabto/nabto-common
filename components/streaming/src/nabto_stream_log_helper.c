@@ -101,4 +101,5 @@ const char* nabto_stream_module_event_to_string(enum nabto_stream_module_event m
         case NABTO_STREAM_MODULE_EVENT_OPENED: return "OPENED";
         case NABTO_STREAM_MODULE_EVENT_ACCEPTED: return "ACCEPTED";
     }
+    return "We should never reach this code";
 }
