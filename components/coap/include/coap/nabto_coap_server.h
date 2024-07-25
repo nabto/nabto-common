@@ -3,6 +3,7 @@
 
 #include <nn/allocator.h>
 #include <nn/log.h>
+#include <nn/string_map.h>
 
 #include "nabto_coap.h"
 #include <stdint.h>
@@ -14,7 +15,6 @@ extern "C" {
 #endif
 
 #define NABTO_COAP_SERVER_LOG_MODULE "coap_server"
-
 struct nabto_coap_server;
 
 enum nabto_coap_server_next_event {
@@ -29,6 +29,7 @@ typedef void (*nabto_coap_free)(void* data);
 struct nabto_coap_server_request;
 struct nabto_coap_server_response;
 struct nabto_coap_server_resource;
+struct nabto_coap_server_request_parameter;
 
 struct nabto_coap_server {
     struct nn_log* logger;
@@ -100,6 +101,13 @@ typedef void (*nabto_coap_server_resource_handler)(struct nabto_coap_server_requ
 nabto_coap_error nabto_coap_server_add_resource(struct nabto_coap_server* server, nabto_coap_code method, const char** segments, nabto_coap_server_resource_handler handler, void* userData, struct nabto_coap_server_resource** resource);
 
 void nabto_coap_server_remove_resource(struct nabto_coap_server_resource* resource);
+
+/**
+ * Find the userdata of a previously added resource.
+ * parameters must be an initialized string map
+ */
+void* nabto_coap_server_find_resource_data(struct nabto_coap_server* server, nabto_coap_code method, const char** segments, struct nn_string_map* parameters);
+
 
 nabto_coap_error nabto_coap_server_send_error_response(struct nabto_coap_server_request* request, nabto_coap_code status, const char* description);
 
