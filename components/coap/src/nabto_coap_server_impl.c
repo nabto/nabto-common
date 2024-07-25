@@ -3,6 +3,7 @@
 
 #include <stdlib.h>
 #include <nn/string.h>
+#include <nn/string_map.h>
 
 const char* unhandledRequest = "Request unhandled";
 
@@ -424,6 +425,52 @@ nabto_coap_error nabto_coap_server_add_resource(struct nabto_coap_server* server
 {
     return nabto_coap_server_add_resource_into_tree(server, server->root, method, segments, handler, userData, resource);
 }
+
+void* nabto_coap_server_find_resource_data(struct nabto_coap_server* server, nabto_coap_code method, const char** segments, struct nn_string_map* parameters)
+{
+    struct nabto_coap_router_node* currentNode = server->root;
+    size_t i = 0;
+    const char* currentSegment = segments[i];
+
+    while (currentSegment != NULL) {
+        struct nabto_coap_router_path_segment* segment = nabto_coap_server_find_path_segment(currentNode, (const char*)currentSegment, strlen(currentSegment));
+        if (segment) {
+            // We found the current segment, moving on to the next or breaks if we reached the end.
+            currentNode = segment->node;
+            i++;
+            currentSegment = segments[i];
+        } else {
+            // test if currentNode has a parameter
+            if (currentNode->parameter.name != NULL) {
+                if (parameters != NULL) {
+                    struct nn_string_map_iterator it = nn_string_map_insert(parameters, currentNode->parameter.name, currentSegment);
+                    if (nn_string_map_is_end(&it)) {
+                        return NULL;
+                    }
+                }
+                currentNode = currentNode->parameter.node;
+            } else {
+                // We did not find a matching segment nor a parameter. Resource does not exist
+                return NULL;
+            }
+            i++;
+            currentSegment = segments[i];
+        }
+    }
+
+    if (method == NABTO_COAP_CODE_GET && currentNode->getHandler.handler) {
+        return currentNode->getHandler.handlerUserData;
+    } else if (method == NABTO_COAP_CODE_POST && currentNode->postHandler.handler) {
+        return currentNode->postHandler.handlerUserData;
+    } else if (method == NABTO_COAP_CODE_PUT && currentNode->putHandler.handler) {
+        return currentNode->putHandler.handlerUserData;
+    } else if (method == NABTO_COAP_CODE_DELETE && currentNode->deleteHandler.handler) {
+        return currentNode->deleteHandler.handlerUserData;
+    } else {
+        return NULL;
+    }
+}
+
 
 struct nabto_coap_router_path_segment* nabto_coap_server_find_path_segment(struct nabto_coap_router_node* node, const char* segment, size_t segmentLength)
 {
