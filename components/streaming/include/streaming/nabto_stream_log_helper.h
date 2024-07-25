@@ -23,6 +23,8 @@ const char* nabto_stream_state_as_string(nabto_stream_state state);
 
 const char* nabto_stream_next_event_type_to_string(enum nabto_stream_next_event_type eventType);
 
+const char* nabto_stream_module_event_to_string(enum nabto_stream_module_event moduleEvent);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
