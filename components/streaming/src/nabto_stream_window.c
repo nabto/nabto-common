@@ -782,6 +782,7 @@ void nabto_stream_handle_data(struct nabto_stream* stream, uint32_t seq, const u
 {
     NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "handle data segment: %" NN_LOG_PRIu32 " size: %" NN_LOG_PRIu16, seq, dataLength);
     if (dataLength > stream->maxRecvSegmentSize) {
+        NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "The data is larger than the max alloved segment. dataLength: %" NN_LOG_PRIu32 ", maxRecvSegmentSize: %" NN_LOG_PRIu16, dataLength, stream->maxRecvSegmentSize);
         // invalid data drop it.
         return;
     }
