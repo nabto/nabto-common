@@ -242,6 +242,9 @@ size_t nabto_stream_can_write(struct nabto_stream* stream)
 // called from event loop which handles inputs and timeouts.
 enum nabto_stream_next_event_type nabto_stream_next_event_to_handle(struct nabto_stream* stream)
 {
+    if (stream->state == ST_IDLE) {
+        return ET_NOTHING;
+    }
     if (stream->state == ST_ACCEPT) {
         return ET_ACCEPT;
     }
