@@ -4,5 +4,13 @@ set(src
   )
 
 add_library(mdns_server ${src})
-target_link_libraries(mdns_server nn)
-target_include_directories(mdns_server PUBLIC include)
+target_link_libraries(mdns_server NabtoCommon::nn)
+target_include_directories(mdns_server PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>" "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+
+target_sources(mdns_server PUBLIC
+    FILE_SET public_headers
+    TYPE HEADERS
+    BASE_DIRS include
+    FILES
+        include/mdns/mdns_server.h
+)
