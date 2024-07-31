@@ -13,6 +13,7 @@ set(src
   )
 
 add_library(nabto_stun_client "${src}")
+add_library(NabtoCommon::nabto_stun_client ALIAS nabto_stun_client)
 target_link_libraries(nabto_stun_client NabtoCommon::nn)
 
 target_include_directories(nabto_stun_client PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>" "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")

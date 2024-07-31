@@ -7,7 +7,9 @@ set(src
   )
 
 add_library(coap ${src})
+add_library(NabtoCommon::coap ALIAS coap)
 target_link_libraries(coap NabtoCommon::nn)
+
 
 target_include_directories(coap PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>" "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
