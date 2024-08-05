@@ -1,10 +1,10 @@
-#include <streaming/nabto_stream_packet.h>
-#include <streaming/nabto_stream_window.h>
-#include <streaming/nabto_stream_protocol.h>
-#include <streaming/nabto_stream_interface.h>
-#include <streaming/nabto_stream_util.h>
-#include <streaming/nabto_stream_flow_control.h>
-#include <streaming/nabto_stream_log_helper.h>
+#include <nabto_stream/nabto_stream_packet.h>
+#include <nabto_stream/nabto_stream_window.h>
+#include <nabto_stream/nabto_stream_protocol.h>
+#include <nabto_stream/nabto_stream_interface.h>
+#include <nabto_stream/nabto_stream_util.h>
+#include <nabto_stream/nabto_stream_flow_control.h>
+#include <nabto_stream/nabto_stream_log_helper.h>
 
 #include "stddef.h"
 

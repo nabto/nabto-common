@@ -21,16 +21,16 @@ target_sources(nabto_stream PUBLIC
     TYPE HEADERS
     BASE_DIRS include
     FILES
-        include/streaming/nabto_stream_config.h
-        include/streaming/nabto_stream_congestion_control.h
-        include/streaming/nabto_stream_flow_control.h
-        include/streaming/nabto_stream.h
-        include/streaming/nabto_stream_interface.h
-        include/streaming/nabto_stream_log_helper.h
-        include/streaming/nabto_stream_memory.h
-        include/streaming/nabto_stream_packet.h
-        include/streaming/nabto_stream_protocol.h
-        include/streaming/nabto_stream_types.h
-        include/streaming/nabto_stream_util.h
-        include/streaming/nabto_stream_window.h
+        include/nabto_stream/nabto_stream_config.h
+        include/nabto_stream/nabto_stream_congestion_control.h
+        include/nabto_stream/nabto_stream_flow_control.h
+        include/nabto_stream/nabto_stream.h
+        include/nabto_stream/nabto_stream_interface.h
+        include/nabto_stream/nabto_stream_log_helper.h
+        include/nabto_stream/nabto_stream_memory.h
+        include/nabto_stream/nabto_stream_packet.h
+        include/nabto_stream/nabto_stream_protocol.h
+        include/nabto_stream/nabto_stream_types.h
+        include/nabto_stream/nabto_stream_util.h
+        include/nabto_stream/nabto_stream_window.h
 )
