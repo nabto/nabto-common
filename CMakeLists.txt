@@ -19,7 +19,7 @@ set(namespace "${PROJECT_NAME}::")
 include(CMakePackageConfigHelpers)
 
 install(
-    TARGETS nn nabto_stun_client nabto_stream mdns_server coap
+    TARGETS nn nabto_stun nabto_stream nabto_mdns nabto_coap
     EXPORT "${TARGETS_EXPORT_NAME}"
     LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
