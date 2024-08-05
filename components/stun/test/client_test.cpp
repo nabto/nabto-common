@@ -1,5 +1,5 @@
 #include <boost/test/unit_test.hpp>
-#include <stun/nabto_stun_client.h>
+#include <nabto_stun/nabto_stun_client.h>
 
 #include <random>
 

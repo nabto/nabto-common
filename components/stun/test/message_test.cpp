@@ -1,5 +1,5 @@
 #include <boost/test/unit_test.hpp>
-#include <stun/nabto_stun_message.h>
+#include <nabto_stun/nabto_stun_message.h>
 
 #ifdef __cplusplus
 extern "C" {

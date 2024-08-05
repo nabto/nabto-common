@@ -1,7 +1,7 @@
 #ifndef _NABTO_STUN_UTIL_H_
 #define _NABTO_STUN_UTIL_H_
 
-#include <stun/nabto_stun_defines.h>
+#include <nabto_stun/nabto_stun_defines.h>
 
 const char* nabto_stun_next_event_type_to_string(enum nabto_stun_next_event_type event)
 {
