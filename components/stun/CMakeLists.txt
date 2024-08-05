@@ -12,19 +12,19 @@ set(src
   src/nabto_stun_util.c
   )
 
-add_library(nabto_stun_client "${src}")
-add_library(NabtoCommon::nabto_stun_client ALIAS nabto_stun_client)
-target_link_libraries(nabto_stun_client NabtoCommon::nn)
+add_library(nabto_stun "${src}")
+add_library(NabtoCommon::nabto_stun ALIAS nabto_stun)
+target_link_libraries(nabto_stun NabtoCommon::nn)
 
-target_include_directories(nabto_stun_client PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>" "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+target_include_directories(nabto_stun PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>" "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
-target_sources(nabto_stun_client PUBLIC
+target_sources(nabto_stun PUBLIC
     FILE_SET public_headers
     TYPE HEADERS
     BASE_DIRS include
     FILES
-        include/stun/nabto_stun_client.h
-        include/stun/nabto_stun_defines.h
-        include/stun/nabto_stun_message.h
-        include/stun/nabto_stun_types.h
+        include/nabto_stun/nabto_stun_client.h
+        include/nabto_stun/nabto_stun_defines.h
+        include/nabto_stun/nabto_stun_message.h
+        include/nabto_stun/nabto_stun_types.h
 )

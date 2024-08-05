@@ -6,20 +6,20 @@ set(src
   src/nabto_coap_client_test.c
   )
 
-add_library(coap ${src})
-add_library(NabtoCommon::coap ALIAS coap)
-target_link_libraries(coap NabtoCommon::nn)
+add_library(nabto_coap ${src})
+add_library(NabtoCommon::nabto_coap ALIAS nabto_coap)
+target_link_libraries(nabto_coap NabtoCommon::nn)
 
 
-target_include_directories(coap PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>" "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+target_include_directories(nabto_coap PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>" "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
-target_sources(coap PUBLIC
+target_sources(nabto_coap PUBLIC
     FILE_SET public_headers
     TYPE HEADERS
     BASE_DIRS include
     FILES
-        include/coap/nabto_coap_client_test.h
-        include/coap/nabto_coap_client.h
-        include/coap/nabto_coap_server.h
-        include/coap/nabto_coap.h
+        include/nabto_coap/nabto_coap_client_test.h
+        include/nabto_coap/nabto_coap_client.h
+        include/nabto_coap/nabto_coap_server.h
+        include/nabto_coap/nabto_coap.h
 )

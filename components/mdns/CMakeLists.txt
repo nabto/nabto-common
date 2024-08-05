@@ -3,15 +3,15 @@ set(src
   src/mdns_server.c
   )
 
-add_library(mdns_server ${src})
-add_library(NabtoCommon::mdns_server ALIAS mdns_server)
-target_link_libraries(mdns_server NabtoCommon::nn)
-target_include_directories(mdns_server PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>" "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+add_library(nabto_mdns ${src})
+add_library(NabtoCommon::nabto_mdns ALIAS nabto_mdns)
+target_link_libraries(nabto_mdns NabtoCommon::nn)
+target_include_directories(nabto_mdns PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>" "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
-target_sources(mdns_server PUBLIC
+target_sources(nabto_mdns PUBLIC
     FILE_SET public_headers
     TYPE HEADERS
     BASE_DIRS include
     FILES
-        include/mdns/mdns_server.h
+        include/nabto_mdns/nabto_mdns_server.h
 )
