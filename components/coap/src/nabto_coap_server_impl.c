@@ -1,4 +1,4 @@
-#include <coap/nabto_coap_server.h>
+#include <nabto_coap/nabto_coap_server.h>
 #include "nabto_coap_server_impl.h"
 
 #include <stdlib.h>

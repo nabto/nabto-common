@@ -1,7 +1,7 @@
 #ifndef _NABTO_COAP_SERVER_IMPL_H_
 #define _NABTO_COAP_SERVER_IMPL_H_
 
-#include <coap/nabto_coap_server.h>
+#include <nabto_coap/nabto_coap_server.h>
 
 #ifdef __cplusplus
 extern "C" {
