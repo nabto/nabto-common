@@ -7,6 +7,8 @@ add_subdirectory(components/streaming)
 add_subdirectory(components/coap)
 add_subdirectory(components/mdns)
 
+
+# Create NabtoCommonConfig.cmake find_package script and install the components
 include(GNUInstallDirs)
 set(config_install_dir "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
 set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -38,16 +40,11 @@ configure_package_config_file(
     INSTALL_DESTINATION "${config_install_dir}"
 )
 
-# Config
-#   * <prefix>/lib/cmake/Foo/FooConfig.cmake
-#   * <prefix>/lib/cmake/Foo/FooConfigVersion.cmake
 install(
     FILES "${project_config}" "${version_config}"
     DESTINATION "${config_install_dir}"
 )
 
-# Config
-#   * <prefix>/lib/cmake/Foo/FooTargets.cmake
 install(
     EXPORT "${TARGETS_EXPORT_NAME}"
     NAMESPACE "${namespace}"
