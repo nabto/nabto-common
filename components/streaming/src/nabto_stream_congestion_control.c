@@ -1,6 +1,6 @@
-#include <streaming/nabto_stream_congestion_control.h>
-#include <streaming/nabto_stream_window.h>
-#include <streaming/nabto_stream_util.h>
+#include <nabto_stream/nabto_stream_congestion_control.h>
+#include <nabto_stream/nabto_stream_window.h>
+#include <nabto_stream/nabto_stream_util.h>
 
 #include <math.h>
 #include <stdlib.h>

@@ -1,5 +1,5 @@
-#include <streaming/nabto_stream_util.h>
-#include <streaming/nabto_stream_protocol.h>
+#include <nabto_stream/nabto_stream_util.h>
+#include <nabto_stream/nabto_stream_protocol.h>
 
 #include <string.h>
 #include <stdio.h>

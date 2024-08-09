@@ -1,7 +1,7 @@
 #ifndef _NABTO_COAP_CLIENT_IMPL_H_
 #define _NABTO_COAP_CLIENT_IMPL_H_
 
-#include <coap/nabto_coap_client.h>
+#include <nabto_coap/nabto_coap_client.h>
 
 enum nabto_coap_client_request_state {
     // the request is not ready to be sent yet

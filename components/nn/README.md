@@ -13,7 +13,14 @@ Implemented structures:
 
 ## Run the test suite
 
+With vcpkg
 ```
-cmake -DNN_BUILD_TESTS=ON <path to nn>
+cmake -DCMAKE_TOOLCHAIN_FILE=~/sandbox/vcpkg/scripts/buildsystems/vcpkg.cmake ../../components/nn/ci-build/
+./nn_test
+```
+
+With boost unit test framework installed on the system:
+```
+cmake ../../components/nn/ci-build/
 ./nn_test
 ```

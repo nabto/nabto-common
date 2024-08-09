@@ -1,4 +1,4 @@
-#include <coap/nabto_coap_client_test.h>
+#include <nabto_coap/nabto_coap_client_test.h>
 #include "nabto_coap_client_impl.h"
 
 // this code is used to create a response which unit tests can use when testing

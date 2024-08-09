@@ -1,4 +1,4 @@
-#include <mdns/mdns_server.h>
+#include <nabto_mdns/nabto_mdns_server.h>
 
 #include <nn/string_map.h>
 #include <nn/string_set.h>

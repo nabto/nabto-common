@@ -1,7 +1,7 @@
 #ifndef _NABTO_COAP_CLIENT_TEST_H_
 #define _NABTO_COAP_CLIENT_TEST_H_
 
-#include <coap/nabto_coap.h>
+#include <nabto_coap/nabto_coap.h>
 
 // define some function such that test instances can be created when testing code
 

@@ -1,4 +1,4 @@
-#include <stun/nabto_stun_client.h>
+#include <nabto_stun/nabto_stun_client.h>
 #include <string.h>
 
 #ifndef NABTO_STUN_SEND_TIMEOUT
@@ -122,7 +122,7 @@ void nabto_stun_compute_result_and_stop(struct nabto_stun* stun)
 
     stun->result.hasDefectNatAnswer = false;
     stun->result.defectNat = false;
-    
+
     if (stun->defectRouterTest.state == COMPLETED) {
         stun->result.hasDefectNatAnswer = true;
         if (stun->result.mapping == STUN_INDEPENDENT &&
