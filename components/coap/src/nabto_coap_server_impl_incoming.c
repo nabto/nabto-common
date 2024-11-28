@@ -29,6 +29,8 @@ static void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_r
 static void nabto_coap_server_make_error_response(struct nabto_coap_server_requests* requests, void* connection, struct nabto_coap_incoming_message* message, nabto_coap_code code, const char* errorDescription);
 
 
+static void print_path_from_msg(struct nabto_coap_incoming_message* msg);
+
 void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests, void* connection, const uint8_t* packet, size_t packetSize)
 {
     struct nabto_coap_incoming_message msg;
@@ -243,6 +245,9 @@ struct nabto_coap_server_request* nabto_coap_server_handle_new_request(struct na
             nabto_coap_server_make_error_response(requests, connection, message, NABTO_COAP_CODE_NOT_FOUND, NULL);
             return NULL;
         }
+
+        printf("VBOX_DEBUG: found res handler: handler=%p, handlerUserData=%p\n", resource->handler, resource->handlerUserData);
+        print_path_from_msg(message);
     }
 
     if(requests->activeRequests >= requests->maxRequests) {
@@ -349,6 +354,20 @@ struct nabto_coap_server_response* nabto_coap_server_find_response(struct nabto_
         request = request->next;
     }
     return NULL;
+}
+
+void print_path_from_msg(struct nabto_coap_incoming_message* msg) {
+ struct nabto_coap_option_iterator itData;
+    struct nabto_coap_option_iterator* iterator = &itData;
+    nabto_coap_option_iterator_init(iterator, msg->options, msg->options+msg->optionsLength);
+    iterator = nabto_coap_get_option(NABTO_COAP_OPTION_URI_PATH, iterator);
+    printf("VBOX_DEBUG: incoming message path: [");
+    while (iterator != NULL) {
+        size_t optionLength = iterator->optionDataEnd - iterator->optionDataBegin;
+        printf("%.*s/", (int)optionLength, (const char*)iterator->optionDataBegin);
+        iterator = nabto_coap_get_option(NABTO_COAP_OPTION_URI_PATH, iterator);
+    }
+    printf("]\n");
 }
 
 struct nabto_coap_server_resource* nabto_coap_server_find_resource(struct nabto_coap_server* server, struct nabto_coap_incoming_message* msg, struct nabto_coap_server_request_parameter* parameters)

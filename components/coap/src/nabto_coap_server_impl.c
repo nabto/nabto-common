@@ -496,8 +496,21 @@ void nabto_coap_router_insert_path_segment(struct nabto_coap_router_path_segment
     segment->prev = before;
 }
 
+void print_path(const char** path) {
+    const char* pathSegments = *path;
+    printf("VBOX_DEBUG - path: [");
+    while (pathSegments) {
+        printf("%s/", pathSegments);
+        path++;
+        pathSegments = *path;
+    }
+    printf("]\n");
+}
+
 nabto_coap_error nabto_coap_server_add_resource_into_tree(struct nabto_coap_server* server, struct nabto_coap_router_node* parent, nabto_coap_code method, const char** path, nabto_coap_server_resource_handler handler, void* userData, struct nabto_coap_server_resource** userRes)
 {
+    printf("VBOX_DEBUG: resource_handler=%p, user_data=%p\n", handler, userData);
+    print_path(path);
     if (*path == NULL) {
         struct nabto_coap_server_resource* resource = NULL;
         if (method == NABTO_COAP_CODE_GET) {
