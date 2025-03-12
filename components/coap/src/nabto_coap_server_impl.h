@@ -51,7 +51,7 @@ struct nabto_coap_server_request {
     struct nabto_coap_server_requests* requests;
     struct nabto_coap_server_request* next;
     struct nabto_coap_server_request* prev;
-    struct nabto_coap_server_resource_handler* handler;
+    nabto_coap_server_resource_handler* handler;
     enum nabto_coap_server_request_state state;
     uint16_t messageId;
     nabto_coap_token token;
