@@ -3,6 +3,7 @@
 
 #include <nn/allocator.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 /**
  * like strdup, duplicate a null terminated c string.
