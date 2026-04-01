@@ -86,6 +86,22 @@ void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests
             nabto_coap_server_handle_ack(requests, response->request, &msg);
             return;
         }
+        // Check if ACK is for an observer notification
+        struct nabto_coap_server_observer* obs = requests->observersSentinel->next;
+        while (obs != requests->observersSentinel) {
+            if (obs->connection == connection && obs->messageId == msg.messageId) {
+                // Notification was acknowledged, clear pending state
+                struct nabto_coap_server* server = requests->server;
+                if (obs->payload) {
+                    server->allocator.free(obs->payload);
+                    obs->payload = NULL;
+                    obs->payloadLength = 0;
+                }
+                obs->sendNow = false;
+                return;
+            }
+            obs = obs->next;
+        }
     } else if (msg.type == NABTO_COAP_TYPE_RST) {
         nabto_coap_server_handle_rst(requests, msg.messageId, connection);
     }
@@ -274,6 +290,26 @@ struct nabto_coap_server_request* nabto_coap_server_handle_new_request(struct na
     request->token = message->token;
     request->resource = resource;
 
+    // Detect observe registration (GET + Observe=0)
+    if (message->hasObserve && message->observe == 0 && message->code == NABTO_COAP_CODE_GET) {
+        request->isObserveRegister = true;
+    }
+
+    // Handle observe deregistration (GET + Observe=1): remove matching observer
+    if (message->hasObserve && message->observe == 1 && message->code == NABTO_COAP_CODE_GET) {
+        struct nabto_coap_server_observer* obs = requests->observersSentinel->next;
+        while (obs != requests->observersSentinel) {
+            struct nabto_coap_server_observer* current = obs;
+            obs = obs->next;
+            if (current->connection == connection &&
+                nabto_coap_token_equal(&current->token, &message->token))
+            {
+                nabto_coap_server_observer_free(current);
+                break;
+            }
+        }
+    }
+
     nabto_coap_server_insert_request_into_list(requests->requestsSentinel, request);
 
     return request;
@@ -320,6 +356,17 @@ void nabto_coap_server_handle_rst(struct nabto_coap_server_requests* requests, u
             }
         }
         request = request->next;
+    }
+
+    // Check if RST matches an observer notification
+    struct nabto_coap_server_observer* obs = requests->observersSentinel->next;
+    while (obs != requests->observersSentinel) {
+        struct nabto_coap_server_observer* current = obs;
+        obs = obs->next;
+        if (current->connection == connection && current->messageId == messageId) {
+            nabto_coap_server_observer_free(current);
+            return;
+        }
     }
 }
 

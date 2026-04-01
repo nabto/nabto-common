@@ -8,6 +8,27 @@ extern "C" {
 #endif
 
 
+struct nabto_coap_server_observer {
+    struct nabto_coap_server_requests* requests;
+    struct nabto_coap_server_observer* next;
+    struct nabto_coap_server_observer* prev;
+    struct nabto_coap_server_resource* resource;
+    void* connection;
+    nabto_coap_token token;
+    uint32_t sequenceNumber;
+    // Notification state
+    bool sendNow;
+    uint8_t retransmissions;
+    uint32_t timeout;
+    uint16_t messageId;
+    nabto_coap_code code;
+    bool hasContentFormat;
+    uint16_t contentFormat;
+    uint8_t* payload;
+    size_t payloadLength;
+    nabto_coap_type notificationType;
+};
+
 enum nabto_coap_server_request_state {
     NABTO_COAP_SERVER_REQUEST_STATE_REQUEST, // The request is being received
     NABTO_COAP_SERVER_REQUEST_STATE_USER, // The application server is handling the request
@@ -69,6 +90,8 @@ struct nabto_coap_server_request {
 
     bool handled;
     bool isFreed;
+    bool isObserveRegister;
+    struct nabto_coap_server_observer* observer; // set if observe was accepted
 
     struct nabto_coap_server_response response;
     struct nabto_coap_server_resource* resource;
@@ -132,6 +155,9 @@ nabto_coap_error nabto_coap_server_add_resource_into_tree(struct nabto_coap_serv
 struct nabto_coap_router_path_segment* nabto_coap_server_find_path_segment(struct nabto_coap_router_node* node, const char* segment, size_t segmentLength);
 
 struct nabto_coap_server_request_parameter* nabto_coap_server_request_parameter_new(struct nabto_coap_server* server);
+
+void nabto_coap_server_observer_free(struct nabto_coap_server_observer* observer);
+void nabto_coap_server_observer_remove_from_list(struct nabto_coap_server_observer* observer);
 
 #ifdef __cplusplus
 } // extern "C"

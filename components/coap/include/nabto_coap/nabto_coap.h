@@ -82,6 +82,7 @@ typedef enum {
     NABTO_COAP_OPTION_URI_HOST = 3,
     NABTO_COAP_OPTION_ETAG = 4,
     NABTO_COAP_OPTION_IF_NONE_MATCH = 5,
+    NABTO_COAP_OPTION_OBSERVE = 6,
     NABTO_COAP_OPTION_URI_PORT = 7,
     NABTO_COAP_OPTION_LOCATION_PATH = 8,
     NABTO_COAP_OPTION_URI_PATH = 11,
@@ -151,6 +152,8 @@ struct nabto_coap_incoming_message {
     uint32_t block1;
     bool hasBlock2;
     uint32_t block2;
+    bool hasObserve;
+    uint32_t observe;
 };
 
 
