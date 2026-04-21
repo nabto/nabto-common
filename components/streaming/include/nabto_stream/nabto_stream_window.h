@@ -423,7 +423,15 @@ struct nabto_stream {
     uint64_t sentBytes;
     uint32_t timeFirstMBReceived; // in ms
     uint32_t timeFirstMBSent; // in ms
+    uint32_t reorderedOrLostSegments;
+    uint32_t sentPackets;
     uint32_t reorderedOrLostPackets;
+    // Dedup tracker: the logicalSentStamp of the most recent segment that
+    // incremented reorderedOrLostPackets. Segments sent in the same outgoing
+    // UDP packet share a logicalSentStamp, so consecutive triple-ACK losses
+    // from the same packet collapse to a single packet-loss count.
+    uint32_t lastLostLogicalStamp;
+    bool lastLostLogicalStampValid;
     uint32_t timeouts;
     nabto_stream_stamp streamStart;
 

@@ -660,6 +660,9 @@ uint8_t* nabto_stream_write_data_to_packet(struct nabto_stream* stream, uint8_t*
         nabto_stream_remove_segment_from_send_list(stream, current);
         nabto_stream_add_segment_to_unacked_list_before_elm(stream, stream->unacked, current);
     }
+    if (*segmentsWritten > 0) {
+        stream->sentPackets++;
+    }
     return ptr;
 }
 
