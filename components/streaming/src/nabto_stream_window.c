@@ -536,12 +536,9 @@ struct nabto_stream_send_segment* nabto_stream_handle_nack_iterator(struct nabto
         if (iterator->ackedAfter == 2) {
             nabto_stream_congestion_control_adjust_ssthresh_after_triple_ack(stream, iterator);
             stream->reorderedOrLostSegments++;
-            if (!stream->lastLostLogicalStampValid ||
-                stream->lastLostLogicalStamp != iterator->logicalSentStamp)
-            {
+            if (stream->lastLostPacketSeq != iterator->packetSeqStamp) {
                 stream->reorderedOrLostPackets++;
-                stream->lastLostLogicalStamp = iterator->logicalSentStamp;
-                stream->lastLostLogicalStampValid = true;
+                stream->lastLostPacketSeq = iterator->packetSeqStamp;
             }
             nabto_stream_mark_segment_for_retransmission(stream, iterator);
         }
