@@ -115,6 +115,8 @@ void nabto_stream_handle_packet(struct nabto_stream* stream, const uint8_t* pack
         return;
     }
 
+    stream->receivedPackets++;
+
     if (nabto_stream_logical_stamp_less(stream->timestampToEcho, hdr.timestampValue)) {
         stream->timestampToEcho = hdr.timestampValue;
     }
@@ -568,7 +570,7 @@ size_t nabto_stream_create_syn_ack_packet(struct nabto_stream* stream, uint8_t* 
 }
 
 // write fin or data extension
-uint8_t* nabto_stream_write_segment(struct nabto_stream* stream, uint8_t* ptr, const uint8_t* end, struct nabto_stream_send_segment* current, uint32_t logicalTimestamp)
+uint8_t* nabto_stream_write_segment(struct nabto_stream* stream, uint8_t* ptr, const uint8_t* end, struct nabto_stream_send_segment* current, uint32_t logicalTimestamp, uint32_t packetSeq)
 {
     if (&stream->finSegment == current) {
         ptr = nabto_stream_write_uint16(ptr, end, NABTO_STREAM_EXTENSION_FIN);
@@ -583,6 +585,7 @@ uint8_t* nabto_stream_write_segment(struct nabto_stream* stream, uint8_t* ptr, c
 
     current->sentStamp = nabto_stream_get_stamp(stream);
     current->logicalSentStamp = logicalTimestamp;
+    current->packetSeqStamp = packetSeq;
     current->ackedAfter = 0;
 
     return ptr;
@@ -623,6 +626,10 @@ size_t nabto_stream_create_ack_packet(struct nabto_stream* stream, uint8_t* buff
 uint8_t* nabto_stream_write_data_to_packet(struct nabto_stream* stream, uint8_t* ptr, const uint8_t* end, size_t* segmentsWritten, uint32_t logicalTimestamp)
 {
     *segmentsWritten = 0;
+    // Tentative sequence of this outgoing packet. Committed to stream->sentPackets
+    // below iff at least one segment was actually written.
+    uint32_t packetSeq = stream->sentPackets + 1;
+
     // add resending data
     while (stream->resendList->nextResend != stream->resendList &&
            nabto_stream_flow_control_can_send(stream, stream->resendList->nextResend->seq))
@@ -632,9 +639,12 @@ uint8_t* nabto_stream_write_data_to_packet(struct nabto_stream* stream, uint8_t*
         struct nabto_stream_send_segment* current = stream->resendList->nextResend;
         if (roomLeft < current->used + NABTO_STREAM_DATA_OVERHEAD) {
             // packet is full return.
+            if (*segmentsWritten > 0) {
+                stream->sentPackets = packetSeq;
+            }
             return ptr;
         }
-        ptr = nabto_stream_write_segment(stream, ptr, end, current, logicalTimestamp);
+        ptr = nabto_stream_write_segment(stream, ptr, end, current, logicalTimestamp, packetSeq);
         *segmentsWritten += 1;
 
         // remove segment from resend list.
@@ -649,9 +659,12 @@ uint8_t* nabto_stream_write_data_to_packet(struct nabto_stream* stream, uint8_t*
         struct nabto_stream_send_segment* current = stream->sendList->nextSend;
         if (roomLeft < current->used + NABTO_STREAM_DATA_OVERHEAD) {
             // packet is full return.
+            if (*segmentsWritten > 0) {
+                stream->sentPackets = packetSeq;
+            }
             return ptr;
         }
-        ptr = nabto_stream_write_segment(stream, ptr, end, current, logicalTimestamp);
+        ptr = nabto_stream_write_segment(stream, ptr, end, current, logicalTimestamp, packetSeq);
         *segmentsWritten += 1;
         stream->cCtrl.flightSize += 1;
         NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "new fligtSize: %d", stream->cCtrl.flightSize);
@@ -659,6 +672,9 @@ uint8_t* nabto_stream_write_data_to_packet(struct nabto_stream* stream, uint8_t*
         // remove segment from send list.
         nabto_stream_remove_segment_from_send_list(stream, current);
         nabto_stream_add_segment_to_unacked_list_before_elm(stream, stream->unacked, current);
+    }
+    if (*segmentsWritten > 0) {
+        stream->sentPackets = packetSeq;
     }
     return ptr;
 }

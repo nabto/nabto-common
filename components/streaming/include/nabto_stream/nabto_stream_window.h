@@ -159,6 +159,11 @@ struct nabto_stream_send_segment {
     b_state_t     state;                 /**< state                  */
     nabto_stream_stamp sentStamp;        /**< When was the data sent. Used to measure rtt */
     uint32_t      logicalSentStamp;
+    // Packet sequence of the last outgoing UDP packet this segment was written
+    // into. Used internally to dedup packet-loss counting so that multiple
+    // segments carried in the same lost packet collapse to one loss event.
+    // Not serialized on the wire. 0 means "never sent"; real stamps start at 1.
+    uint32_t      packetSeqStamp;
     uint16_t      ackedAfter;            /**< Number of buffers which
                                           * has been acked which is
                                           * after this buffer in the
@@ -423,7 +428,20 @@ struct nabto_stream {
     uint64_t sentBytes;
     uint32_t timeFirstMBReceived; // in ms
     uint32_t timeFirstMBSent; // in ms
+    uint32_t reorderedOrLostSegments;
+    // sentPackets also serves as the per-stream packet sequence number:
+    // the packet currently being built will carry seq sentPackets+1, and
+    // sentPackets is incremented to that value once the packet has been
+    // filled with at least one segment.
+    uint32_t sentPackets;
+    uint32_t receivedPackets;
     uint32_t reorderedOrLostPackets;
+    // Dedup tracker: the packetSeqStamp of the most recent segment that
+    // incremented reorderedOrLostPackets. Segments sent in the same outgoing
+    // UDP packet share a packetSeqStamp, so consecutive triple-ACK losses
+    // from the same packet collapse to a single packet-loss count. 0 is a
+    // safe sentinel since real stamps start at 1.
+    uint32_t lastLostPacketSeq;
     uint32_t timeouts;
     nabto_stream_stamp streamStart;
 
