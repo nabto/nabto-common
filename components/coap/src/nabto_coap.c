@@ -203,7 +203,14 @@ bool nabto_coap_parse_message(const uint8_t* packet, size_t packetSize, struct n
     iterator = nabto_coap_get_next_option(iterator);
     while (iterator != NULL) {
         uint32_t value;
-        if (iterator->option == NABTO_COAP_OPTION_CONTENT_FORMAT) {
+        if (iterator->option == NABTO_COAP_OPTION_OBSERVE) {
+            if (!nabto_coap_parse_variable_int(iterator->optionDataBegin, iterator->optionDataEnd, 3, &value)) {
+                return false;
+            } else {
+                msg->hasObserve = true;
+                msg->observe = value;
+            }
+        } else if (iterator->option == NABTO_COAP_OPTION_CONTENT_FORMAT) {
             if (!nabto_coap_parse_variable_int(iterator->optionDataBegin, iterator->optionDataEnd, 2, &value)) {
                 return false;
             } else {

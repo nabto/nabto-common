@@ -56,6 +56,9 @@ struct nabto_coap_client_request {
     bool hasBlock2;
     uint32_t block2;
 
+    bool isObserve;
+    bool observeDeregister;
+
     // Called when we are done processing the request and it can be
     // freed appropriately
     nabto_coap_client_request_end_handler endHandler;
@@ -74,6 +77,8 @@ struct nabto_coap_client_response {
     uint8_t* payload;
     size_t payloadLength;
     uint16_t messageId;
+    bool hasObserve;
+    uint32_t observe;
 };
 
 #endif

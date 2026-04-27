@@ -28,7 +28,8 @@ enum nabto_coap_client_status {
     NABTO_COAP_CLIENT_STATUS_DECODE_ERROR,
     NABTO_COAP_CLIENT_STATUS_TIMEOUT,
     NABTO_COAP_CLIENT_STATUS_IN_PROGRESS,
-    NABTO_COAP_CLIENT_STATUS_STOPPED
+    NABTO_COAP_CLIENT_STATUS_STOPPED,
+    NABTO_COAP_CLIENT_STATUS_OBSERVE_NOTIFICATION
 };
 
 
@@ -121,7 +122,24 @@ void nabto_coap_client_remove_connection(struct nabto_coap_client* client, void 
  */
 //void nabto_coap_client_request_accept(struct nabto_coap_client_request* request, uint16_t format);
 
-//void nabto_coap_client_request_observe(struct nabto_coap_client_request* request);
+/**
+ * Mark a request as an observe registration (Observe=0).
+ * The endHandler will be called for each notification, not just the first response.
+ * Must be called before nabto_coap_client_request_send().
+ */
+void nabto_coap_client_request_observe(struct nabto_coap_client_request* request);
+
+/**
+ * Deregister an active observation (sends Observe=1).
+ * The endHandler will be called one final time with status OK.
+ */
+void nabto_coap_client_request_observe_deregister(struct nabto_coap_client_request* request);
+
+/**
+ * Get the observe sequence number from a notification response.
+ * Returns true if the response carries an Observe option.
+ */
+bool nabto_coap_client_response_get_observe(struct nabto_coap_client_response* response, uint32_t* observe);
 
 /**
  * Return status of a request

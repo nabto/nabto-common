@@ -30,6 +30,7 @@ struct nabto_coap_server_request;
 struct nabto_coap_server_response;
 struct nabto_coap_server_resource;
 struct nabto_coap_server_request_parameter;
+struct nabto_coap_server_observer;
 
 struct nabto_coap_server {
     struct nn_log* logger;
@@ -71,6 +72,8 @@ struct nabto_coap_server_requests {
 
     size_t maxRequests; // max concurrent requests
     size_t activeRequests;
+
+    struct nabto_coap_server_observer* observersSentinel;
 };
 
 nabto_coap_error nabto_coap_server_init(struct nabto_coap_server* server, struct nn_log* logger, struct nn_allocator* allocator);
@@ -137,6 +140,45 @@ bool nabto_coap_server_request_get_payload(struct nabto_coap_server_request* req
 void* nabto_coap_server_request_get_connection(struct nabto_coap_server_request* request);
 
 const char* nabto_coap_server_request_get_parameter(struct nabto_coap_server_request* request, const char* parameter);
+
+/**
+ * Check if a request is an observe registration (GET + Observe=0).
+ */
+bool nabto_coap_server_request_is_observe(struct nabto_coap_server_request* request);
+
+/**
+ * Accept an observe registration from a request handler.
+ * Creates an observer entry that will receive future notifications.
+ * Must be called before nabto_coap_server_response_ready().
+ */
+nabto_coap_error nabto_coap_server_request_accept_observe(struct nabto_coap_server_request* request);
+
+/**
+ * Get the observer handle for a request that has had observe accepted.
+ * Returns NULL if the request was not accepted as an observe registration.
+ * The returned pointer can be passed to nabto_coap_server_remove_observer().
+ * The handle remains valid until the observer is freed (e.g. via
+ * nabto_coap_server_remove_observer, RST from the client, retransmits
+ * exhausted, or the connection being removed).
+ */
+struct nabto_coap_server_observer* nabto_coap_server_request_get_observer(struct nabto_coap_server_request* request);
+
+/**
+ * Push a notification to all observers of a resource.
+ * Each observer receives a CON message with the given payload.
+ */
+nabto_coap_error nabto_coap_server_resource_notify(
+    struct nabto_coap_server_requests* requests,
+    struct nabto_coap_server_resource* resource,
+    nabto_coap_code code,
+    uint16_t contentFormat,
+    const void* payload,
+    size_t payloadLength);
+
+/**
+ * Remove a specific observer.
+ */
+void nabto_coap_server_remove_observer(struct nabto_coap_server_observer* observer);
 
 /**
  * handle packets and events

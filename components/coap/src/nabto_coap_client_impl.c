@@ -5,6 +5,7 @@ static struct nabto_coap_client_request* nabto_coap_client_find_request(struct n
 
 static bool nabto_coap_client_request_need_send(struct nabto_coap_client_request* request, uint32_t now);
 static bool nabto_coap_client_request_need_wait(struct nabto_coap_client_request* requst);
+static void nabto_coap_client_response_free(struct nabto_coap_client_response* response);
 
 static uint8_t* nabto_coap_client_request_create_packet(struct nabto_coap_client_request* request, uint32_t now, uint8_t* buffer, uint8_t* end, void** connection);
 
@@ -66,8 +67,26 @@ void nabto_coap_client_handle_callback(struct nabto_coap_client* client)
     struct nabto_coap_client_request* iterator = client->requestsSentinel->next;
     while(iterator != client->requestsSentinel) {
         if (iterator->state == NABTO_COAP_CLIENT_REQUEST_STATE_DONE_CALLBACK) {
-            iterator->state = NABTO_COAP_CLIENT_REQUEST_STATE_DONE;
-            iterator->endHandler(iterator, iterator->endHandlerUserData);
+            if (iterator->isObserve && !iterator->observeDeregister &&
+                iterator->response != NULL && iterator->response->hasObserve &&
+                iterator->status != NABTO_COAP_CLIENT_STATUS_STOPPED &&
+                iterator->status != NABTO_COAP_CLIENT_STATUS_TIMEOUT) {
+                // Observe notification: keep request alive for more
+                // notifications. Only re-arm when the response actually
+                // carries the Observe option — otherwise the server didn't
+                // honor the registration (or returned an error) and the
+                // request must complete normally so it doesn't get stuck
+                // in WAIT_RESPONSE forever.
+                // Idle-timeout while observing is suppressed by
+                // request_need_wait(); the caller's configured timeout is
+                // preserved so a later deregister exchange still times out.
+                iterator->state = NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE;
+                iterator->status = NABTO_COAP_CLIENT_STATUS_OBSERVE_NOTIFICATION;
+                iterator->endHandler(iterator, iterator->endHandlerUserData);
+            } else {
+                iterator->state = NABTO_COAP_CLIENT_REQUEST_STATE_DONE;
+                iterator->endHandler(iterator, iterator->endHandlerUserData);
+            }
             // This potentially modifies the iterator if the user
             // decides to free the request in the callback.
             return;
@@ -123,6 +142,15 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
 {
     struct nabto_coap_client_response* response = request->response;
     struct nabto_coap_client* client = request->client;
+
+    // A message is the start of a fresh response unless it is a Block2
+    // continuation (Block2 with non-zero offset). For a fresh response we
+    // must clear any stale payload/options carried over from a previous
+    // exchange (notably, earlier observe notifications reuse the same
+    // response struct).
+    bool isFreshResponse =
+        !(message->hasBlock2 && NABTO_COAP_BLOCK_OFFSET(message->block2) > 0);
+
     if (response == NULL) {
         response = client->allocator.calloc(1, sizeof(struct nabto_coap_client_response));
         if (response == NULL) {
@@ -130,6 +158,16 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
         }
         response->request = request;
         request->response = response;
+    } else if (isFreshResponse) {
+        if (response->payload) {
+            client->allocator.free(response->payload);
+            response->payload = NULL;
+        }
+        response->payloadLength = 0;
+        response->hasContentFormat = false;
+        response->hasObserve = false;
+        request->hasBlock2 = false;
+        request->block2 = 0;
     }
 
     response->code = message->code;
@@ -138,6 +176,11 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
     if (message->hasContentFormat) {
         response->hasContentFormat = true;
         response->contentFormat = message->contentFormat;
+    }
+
+    if (message->hasObserve) {
+        response->hasObserve = true;
+        response->observe = message->observe;
     }
 
     if (message->hasBlock2) {
@@ -393,6 +436,12 @@ uint8_t* nabto_coap_client_request_create_packet(struct nabto_coap_client_reques
 
     uint16_t currentOption = 0;
 
+    if (request->isObserve) {
+        uint32_t observeValue = request->observeDeregister ? 1 : 0;
+        ptr = nabto_coap_encode_varint_option(NABTO_COAP_OPTION_OBSERVE - currentOption, observeValue, ptr, end);
+        currentOption = NABTO_COAP_OPTION_OBSERVE;
+    }
+
     for (size_t i = 0; i < request->pathSegmentsLength; i++) {
         uint16_t optionDelta = NABTO_COAP_OPTION_URI_PATH - currentOption;
         const char* pathSegmentBegin = request->pathSegments[i];
@@ -471,8 +520,16 @@ bool nabto_coap_client_request_need_wait(struct nabto_coap_client_request* reque
     if (request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_ACK) {
         return true;
     }
-    if ( request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE && request->configuredTimeoutMilliseconds != 0) {
-        return true;
+    if (request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE) {
+        // While observing (waiting for the next notification), there is no
+        // idle timeout. Once a deregister has been initiated we revert to
+        // the configured timeout for the deregister exchange.
+        if (request->isObserve && !request->observeDeregister) {
+            return false;
+        }
+        if (request->configuredTimeoutMilliseconds != 0) {
+            return true;
+        }
     }
     return false;
 }
@@ -607,7 +664,7 @@ void nabto_coap_client_request_cancel(struct nabto_coap_client_request* request)
 }
 
 
-void nabto_coap_client_response_free(struct nabto_coap_client_response* response) {
+static void nabto_coap_client_response_free(struct nabto_coap_client_response* response) {
     struct nabto_coap_client* client = response->request->client;
     if (response->payloadLength != 0) {
         client->allocator.free(response->payload);
@@ -692,11 +749,37 @@ void nabto_coap_client_remove_connection(struct nabto_coap_client* client, void 
 //void nabto_coap_client_request_accept(struct nabto_coap_client_request* request, uint16_t format);
 
 
-//void nabto_coap_client_request_observe(struct nabto_coap_client_request* request);
+void nabto_coap_client_request_observe(struct nabto_coap_client_request* request)
+{
+    request->isObserve = true;
+}
+
+void nabto_coap_client_request_observe_deregister(struct nabto_coap_client_request* request)
+{
+    struct nabto_coap_client* client = request->client;
+    request->observeDeregister = true;
+    if (request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE) {
+        request->messageId = nabto_coap_client_next_message_id(client);
+        request->retransmissions = 0;
+        request->state = NABTO_COAP_CLIENT_REQUEST_STATE_SEND_REQUEST;
+        client->notifyEvent(client->userData);
+    }
+}
+
+bool nabto_coap_client_response_get_observe(struct nabto_coap_client_response* response, uint32_t* observe)
+{
+    if (response && response->hasObserve) {
+        *observe = response->observe;
+        return true;
+    }
+    return false;
+}
 
 enum nabto_coap_client_status nabto_coap_client_request_get_status(struct nabto_coap_client_request* request)
 {
     if (request->state == NABTO_COAP_CLIENT_REQUEST_STATE_DONE) {
+        return request->status;
+    } else if (request->status == NABTO_COAP_CLIENT_STATUS_OBSERVE_NOTIFICATION) {
         return request->status;
     } else {
         return NABTO_COAP_CLIENT_STATUS_IN_PROGRESS;

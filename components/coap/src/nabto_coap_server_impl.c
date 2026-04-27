@@ -43,6 +43,16 @@ nabto_coap_error nabto_coap_server_requests_init(struct nabto_coap_server_reques
     requests->requestsSentinel->next = requests->requestsSentinel;
     requests->requestsSentinel->prev = requests->requestsSentinel;
 
+    // init observers list
+    requests->observersSentinel = server->allocator.calloc(1, sizeof(struct nabto_coap_server_observer));
+    if (requests->observersSentinel == NULL) {
+        server->allocator.free(requests->requestsSentinel);
+        requests->requestsSentinel = NULL;
+        return NABTO_COAP_ERROR_OUT_OF_MEMORY;
+    }
+    requests->observersSentinel->next = requests->observersSentinel;
+    requests->observersSentinel->prev = requests->observersSentinel;
+
     return NABTO_COAP_ERROR_OK;
 }
 
@@ -53,6 +63,19 @@ nabto_coap_error nabto_coap_server_requests_init(struct nabto_coap_server_reques
 void nabto_coap_server_requests_destroy(struct nabto_coap_server_requests* requests)
 {
     struct nabto_coap_server* server = requests->server;
+
+    // Free all observers
+    if (requests->observersSentinel) {
+        struct nabto_coap_server_observer* obsIt = requests->observersSentinel->next;
+        while (obsIt != requests->observersSentinel) {
+            struct nabto_coap_server_observer* current = obsIt;
+            obsIt = obsIt->next;
+            nabto_coap_server_observer_free(current);
+        }
+        server->allocator.free(requests->observersSentinel);
+        requests->observersSentinel = NULL;
+    }
+
     struct nabto_coap_server_request* iterator = requests->requestsSentinel->next;
     while(iterator != requests->requestsSentinel) {
         struct nabto_coap_server_request* current = iterator;
@@ -137,6 +160,24 @@ void nabto_coap_server_handle_timeout(struct nabto_coap_server_requests* request
         }
         request = request->next;
     }
+
+    // Handle observer notification timeouts
+    struct nabto_coap_server_observer* obs = requests->observersSentinel->next;
+    while (obs != requests->observersSentinel) {
+        struct nabto_coap_server_observer* current = obs;
+        obs = obs->next;
+        if (current->waitingForAck) {
+            if (nabto_coap_is_stamp_less_equal(current->timeout, now)) {
+                if (current->retransmissions > NABTO_COAP_MAX_RETRANSMITS) {
+                    // Client is unreachable, remove observer
+                    nabto_coap_server_observer_free(current);
+                    continue;
+                }
+                current->waitingForAck = false;
+                current->sendNow = true;
+            }
+        }
+    }
 }
 
 enum nabto_coap_server_next_event nabto_coap_server_next_event(struct nabto_coap_server_requests* requests)
@@ -161,6 +202,15 @@ enum nabto_coap_server_next_event nabto_coap_server_next_event(struct nabto_coap
         request = request->next;
     }
 
+    // Check observers for sendNow
+    struct nabto_coap_server_observer* obs = requests->observersSentinel->next;
+    while (obs != requests->observersSentinel) {
+        if (obs->sendNow) {
+            return NABTO_COAP_SERVER_NEXT_EVENT_SEND;
+        }
+        obs = obs->next;
+    }
+
     request = requests->requestsSentinel->next;
     while(request != requests->requestsSentinel) {
         if (request->state == NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE) {
@@ -168,6 +218,15 @@ enum nabto_coap_server_next_event nabto_coap_server_next_event(struct nabto_coap
             return NABTO_COAP_SERVER_NEXT_EVENT_WAIT;
         }
         request = request->next;
+    }
+
+    // Check observers for pending timeouts
+    obs = requests->observersSentinel->next;
+    while (obs != requests->observersSentinel) {
+        if (obs->waitingForAck) {
+            return NABTO_COAP_SERVER_NEXT_EVENT_WAIT;
+        }
+        obs = obs->next;
     }
 
     return NABTO_COAP_SERVER_NEXT_EVENT_NOTHING;
@@ -188,6 +247,21 @@ bool nabto_coap_server_get_next_timeout(struct nabto_coap_server_requests* reque
         }
         request = request->next;
     }
+
+    // Also check observer timeouts
+    struct nabto_coap_server_observer* obs = requests->observersSentinel->next;
+    while (obs != requests->observersSentinel) {
+        if (obs->waitingForAck) {
+            if (first) {
+                first = false;
+                *nextTimeout = obs->timeout;
+            } else {
+                *nextTimeout = nabto_coap_stamp_min(*nextTimeout, obs->timeout);
+            }
+        }
+        obs = obs->next;
+    }
+
     return !first;
 }
 
@@ -216,6 +290,16 @@ void* nabto_coap_server_get_connection_send(struct nabto_coap_server_requests* r
         }
         request = request->next;
     }
+
+    // Check observers
+    struct nabto_coap_server_observer* obs = requests->observersSentinel->next;
+    while (obs != requests->observersSentinel) {
+        if (obs->sendNow) {
+            return obs->connection;
+        }
+        obs = obs->next;
+    }
+
     return NULL;
 }
 
@@ -299,6 +383,12 @@ static uint8_t* nabto_coap_server_send_in_response_state(struct nabto_coap_serve
 
     uint16_t currentOption = 0;
 
+    // Include Observe option in initial response if observe was accepted
+    if (request->observer != NULL) {
+        ptr = nabto_coap_encode_varint_option(NABTO_COAP_OPTION_OBSERVE - currentOption, request->observer->sequenceNumber, ptr, end);
+        currentOption = NABTO_COAP_OPTION_OBSERVE;
+    }
+
     if (response->hasContentFormat) {
         uint16_t optionDelta = NABTO_COAP_OPTION_CONTENT_FORMAT - currentOption;
         ptr = nabto_coap_encode_varint_option(optionDelta, response->contentFormat, ptr, end);
@@ -350,6 +440,58 @@ static uint8_t* nabto_coap_server_send_in_response_state(struct nabto_coap_serve
 }
 
 
+static uint8_t* nabto_coap_server_send_observer_notification(struct nabto_coap_server_requests* requests, struct nabto_coap_server_observer* observer, uint8_t* buffer, uint8_t* end)
+{
+    uint8_t* ptr = buffer;
+    struct nabto_coap_message_header header;
+    memset(&header, 0, sizeof(struct nabto_coap_message_header));
+    header.type = observer->notificationType;
+    header.token = observer->token;
+    header.code = observer->code;
+    header.messageId = observer->messageId;
+
+    ptr = nabto_coap_encode_header(&header, ptr, end);
+
+    uint16_t currentOption = 0;
+
+    // Observe option (6)
+    ptr = nabto_coap_encode_varint_option(NABTO_COAP_OPTION_OBSERVE - currentOption, observer->sequenceNumber, ptr, end);
+    currentOption = NABTO_COAP_OPTION_OBSERVE;
+
+    // Content-Format option (12)
+    if (observer->hasContentFormat) {
+        uint16_t optionDelta = NABTO_COAP_OPTION_CONTENT_FORMAT - currentOption;
+        ptr = nabto_coap_encode_varint_option(optionDelta, observer->contentFormat, ptr, end);
+        currentOption = NABTO_COAP_OPTION_CONTENT_FORMAT;
+    }
+
+    // Payload
+    ptr = nabto_coap_encode_payload(observer->payload, observer->payloadLength, ptr, end);
+
+    if (ptr == NULL) {
+        // Encoding failed (e.g., buffer too small). Leave observer state
+        // unchanged so the caller can retry on a larger buffer.
+        return NULL;
+    }
+
+    if (observer->notificationType == NABTO_COAP_TYPE_CON) {
+        observer->sendNow = false;
+        observer->waitingForAck = true;
+        observer->timeout = nabto_coap_server_stamp_now(requests);
+        observer->timeout += (requests->server->ackTimeout) << observer->retransmissions;
+        observer->retransmissions += 1;
+    } else {
+        // NON: no retransmission needed, clear notification state
+        observer->sendNow = false;
+        struct nabto_coap_server* server = requests->server;
+        server->allocator.free(observer->payload);
+        observer->payload = NULL;
+        observer->payloadLength = 0;
+    }
+
+    return ptr;
+}
+
 uint8_t* nabto_coap_server_handle_send(struct nabto_coap_server_requests* requests, uint8_t* buffer, uint8_t* end)
 {
     if (requests->errorConnection) {
@@ -373,6 +515,15 @@ uint8_t* nabto_coap_server_handle_send(struct nabto_coap_server_requests* reques
             return nabto_coap_server_send_in_response_state(requests, request, buffer, end);
         }
         request = request->next;
+    }
+
+    // Check observers
+    struct nabto_coap_server_observer* obs = requests->observersSentinel->next;
+    while (obs != requests->observersSentinel) {
+        if (obs->sendNow) {
+            return nabto_coap_server_send_observer_notification(requests, obs, buffer, end);
+        }
+        obs = obs->next;
     }
 
     return NULL;
@@ -664,8 +815,195 @@ const char* nabto_coap_server_request_get_parameter(struct nabto_coap_server_req
     return NULL;
 }
 
+void nabto_coap_server_observer_remove_from_list(struct nabto_coap_server_observer* observer)
+{
+    struct nabto_coap_server_observer* prev = observer->prev;
+    struct nabto_coap_server_observer* next = observer->next;
+    prev->next = next;
+    next->prev = prev;
+    observer->next = observer;
+    observer->prev = observer;
+}
+
+void nabto_coap_server_observer_free(struct nabto_coap_server_observer* observer)
+{
+    struct nabto_coap_server* server = observer->requests->server;
+    nabto_coap_server_observer_remove_from_list(observer);
+    if (observer->payload) {
+        server->allocator.free(observer->payload);
+    }
+    if (observer->pendingPayload) {
+        server->allocator.free(observer->pendingPayload);
+    }
+    server->allocator.free(observer);
+}
+
+void nabto_coap_server_observer_promote_pending(struct nabto_coap_server_requests* requests, struct nabto_coap_server_observer* observer)
+{
+    if (!observer->pendingValid) {
+        return;
+    }
+    struct nabto_coap_server* server = requests->server;
+
+    if (observer->payload) {
+        server->allocator.free(observer->payload);
+    }
+    observer->code = observer->pendingCode;
+    observer->hasContentFormat = observer->pendingHasContentFormat;
+    observer->contentFormat = observer->pendingContentFormat;
+    observer->payload = observer->pendingPayload;
+    observer->payloadLength = observer->pendingPayloadLength;
+
+    observer->sequenceNumber++;
+    observer->messageId = nabto_coap_server_next_message_id(requests);
+    observer->retransmissions = 0;
+    observer->sendNow = true;
+    observer->waitingForAck = false;
+
+    observer->pendingValid = false;
+    observer->pendingPayload = NULL;
+    observer->pendingPayloadLength = 0;
+    observer->pendingHasContentFormat = false;
+}
+
+bool nabto_coap_server_request_is_observe(struct nabto_coap_server_request* request)
+{
+    return request->isObserveRegister;
+}
+
+nabto_coap_error nabto_coap_server_request_accept_observe(struct nabto_coap_server_request* request)
+{
+    if (!request->isObserveRegister) {
+        return NABTO_COAP_ERROR_INVALID_PARAMETER;
+    }
+    struct nabto_coap_server_requests* requests = request->requests;
+    struct nabto_coap_server* server = requests->server;
+
+    // Check if we already have an observer for this token+connection; if so, replace it
+    struct nabto_coap_server_observer* existing = requests->observersSentinel->next;
+    while (existing != requests->observersSentinel) {
+        struct nabto_coap_server_observer* current = existing;
+        existing = existing->next;
+        if (current->connection == request->connection &&
+            nabto_coap_token_equal(&current->token, &request->token))
+        {
+            nabto_coap_server_observer_free(current);
+            break;
+        }
+    }
+
+    struct nabto_coap_server_observer* observer = server->allocator.calloc(1, sizeof(struct nabto_coap_server_observer));
+    if (observer == NULL) {
+        return NABTO_COAP_ERROR_OUT_OF_MEMORY;
+    }
+    observer->requests = requests;
+    observer->resource = request->resource;
+    observer->connection = request->connection;
+    observer->token = request->token;
+    observer->sequenceNumber = 0;
+    observer->notificationType = NABTO_COAP_TYPE_CON;
+
+    // Insert into list
+    struct nabto_coap_server_observer* sentinel = requests->observersSentinel;
+    struct nabto_coap_server_observer* after = sentinel->next;
+    sentinel->next = observer;
+    observer->next = after;
+    after->prev = observer;
+    observer->prev = sentinel;
+
+    request->observer = observer;
+    return NABTO_COAP_ERROR_OK;
+}
+
+nabto_coap_error nabto_coap_server_resource_notify(
+    struct nabto_coap_server_requests* requests,
+    struct nabto_coap_server_resource* resource,
+    nabto_coap_code code,
+    uint16_t contentFormat,
+    const void* payload,
+    size_t payloadLength)
+{
+    struct nabto_coap_server* server = requests->server;
+    nabto_coap_error result = NABTO_COAP_ERROR_OK;
+    bool anyMarkedSendNow = false;
+    struct nabto_coap_server_observer* obs = requests->observersSentinel->next;
+    while (obs != requests->observersSentinel) {
+        if (obs->resource == resource) {
+            uint8_t* newPayload = NULL;
+            if (payloadLength > 0 && payload != NULL) {
+                newPayload = server->allocator.calloc(1, payloadLength + 1);
+                if (newPayload == NULL) {
+                    // Skip this observer; keep going so other observers
+                    // are still notified.
+                    result = NABTO_COAP_ERROR_OUT_OF_MEMORY;
+                    obs = obs->next;
+                    continue;
+                }
+                memcpy(newPayload, payload, payloadLength);
+            }
+
+            if (obs->waitingForAck) {
+                // A CON is currently in flight. Don't clobber its
+                // messageId/retransmission state — coalesce the new state
+                // into the pending slot. It will be promoted to the
+                // current notification once the in-flight CON is ACKed.
+                if (obs->pendingPayload) {
+                    server->allocator.free(obs->pendingPayload);
+                }
+                obs->pendingValid = true;
+                obs->pendingCode = code;
+                obs->pendingHasContentFormat = true;
+                obs->pendingContentFormat = contentFormat;
+                obs->pendingPayload = newPayload;
+                obs->pendingPayloadLength = newPayload ? payloadLength : 0;
+            } else {
+                if (obs->payload) {
+                    server->allocator.free(obs->payload);
+                    obs->payload = NULL;
+                    obs->payloadLength = 0;
+                }
+                obs->sequenceNumber++;
+                obs->code = code;
+                obs->hasContentFormat = true;
+                obs->contentFormat = contentFormat;
+                obs->payload = newPayload;
+                obs->payloadLength = newPayload ? payloadLength : 0;
+                obs->messageId = nabto_coap_server_next_message_id(requests);
+                obs->retransmissions = 0;
+                obs->sendNow = true;
+                anyMarkedSendNow = true;
+            }
+        }
+        obs = obs->next;
+    }
+    if (anyMarkedSendNow) {
+        requests->notifyEvent(requests->userData);
+    }
+    return result;
+}
+
+struct nabto_coap_server_observer* nabto_coap_server_request_get_observer(struct nabto_coap_server_request* request)
+{
+    return request->observer;
+}
+
+void nabto_coap_server_remove_observer(struct nabto_coap_server_observer* observer)
+{
+    nabto_coap_server_observer_free(observer);
+}
+
 void nabto_coap_server_remove_connection(struct nabto_coap_server_requests* requests, void* connection)
 {
+    // Remove observers for this connection
+    struct nabto_coap_server_observer* obsIt = requests->observersSentinel->next;
+    while (obsIt != requests->observersSentinel) {
+        struct nabto_coap_server_observer* currentObs = obsIt;
+        obsIt = obsIt->next;
+        if (currentObs->connection == connection) {
+            nabto_coap_server_observer_free(currentObs);
+        }
+    }
+
     // Loop over all requests terminate all request where the
     // connection is dead. Or mark them as connection dead so they
     // will die when the user code resolves the request.
