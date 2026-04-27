@@ -28,6 +28,18 @@ struct nabto_coap_server_observer {
     uint8_t* payload;
     size_t payloadLength;
     nabto_coap_type notificationType;
+
+    // Pending update: a notification that arrived while the current CON
+    // was still waiting for ACK. Coalesced into a single slot — only the
+    // most recent update is kept. Promoted to the "current" notification
+    // slot once the in-flight CON is acknowledged so the in-flight CON's
+    // messageId/retransmission schedule stays correlatable.
+    bool pendingValid;
+    nabto_coap_code pendingCode;
+    bool pendingHasContentFormat;
+    uint16_t pendingContentFormat;
+    uint8_t* pendingPayload;
+    size_t pendingPayloadLength;
 };
 
 enum nabto_coap_server_request_state {
@@ -159,6 +171,7 @@ struct nabto_coap_server_request_parameter* nabto_coap_server_request_parameter_
 
 void nabto_coap_server_observer_free(struct nabto_coap_server_observer* observer);
 void nabto_coap_server_observer_remove_from_list(struct nabto_coap_server_observer* observer);
+void nabto_coap_server_observer_promote_pending(struct nabto_coap_server_requests* requests, struct nabto_coap_server_observer* observer);
 
 #ifdef __cplusplus
 } // extern "C"

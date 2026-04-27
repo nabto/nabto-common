@@ -832,7 +832,38 @@ void nabto_coap_server_observer_free(struct nabto_coap_server_observer* observer
     if (observer->payload) {
         server->allocator.free(observer->payload);
     }
+    if (observer->pendingPayload) {
+        server->allocator.free(observer->pendingPayload);
+    }
     server->allocator.free(observer);
+}
+
+void nabto_coap_server_observer_promote_pending(struct nabto_coap_server_requests* requests, struct nabto_coap_server_observer* observer)
+{
+    if (!observer->pendingValid) {
+        return;
+    }
+    struct nabto_coap_server* server = requests->server;
+
+    if (observer->payload) {
+        server->allocator.free(observer->payload);
+    }
+    observer->code = observer->pendingCode;
+    observer->hasContentFormat = observer->pendingHasContentFormat;
+    observer->contentFormat = observer->pendingContentFormat;
+    observer->payload = observer->pendingPayload;
+    observer->payloadLength = observer->pendingPayloadLength;
+
+    observer->sequenceNumber++;
+    observer->messageId = nabto_coap_server_next_message_id(requests);
+    observer->retransmissions = 0;
+    observer->sendNow = true;
+    observer->waitingForAck = false;
+
+    observer->pendingValid = false;
+    observer->pendingPayload = NULL;
+    observer->pendingPayloadLength = 0;
+    observer->pendingHasContentFormat = false;
 }
 
 bool nabto_coap_server_request_is_observe(struct nabto_coap_server_request* request)
@@ -898,13 +929,6 @@ nabto_coap_error nabto_coap_server_resource_notify(
     struct nabto_coap_server_observer* obs = requests->observersSentinel->next;
     while (obs != requests->observersSentinel) {
         if (obs->resource == resource) {
-            // Free old payload if any
-            if (obs->payload) {
-                server->allocator.free(obs->payload);
-                obs->payload = NULL;
-                obs->payloadLength = 0;
-            }
-
             uint8_t* newPayload = NULL;
             if (payloadLength > 0 && payload != NULL) {
                 newPayload = server->allocator.calloc(1, payloadLength + 1);
@@ -918,17 +942,37 @@ nabto_coap_error nabto_coap_server_resource_notify(
                 memcpy(newPayload, payload, payloadLength);
             }
 
-            obs->sequenceNumber++;
-            obs->code = code;
-            obs->hasContentFormat = true;
-            obs->contentFormat = contentFormat;
-            obs->payload = newPayload;
-            obs->payloadLength = newPayload ? payloadLength : 0;
-            obs->messageId = nabto_coap_server_next_message_id(requests);
-            obs->retransmissions = 0;
-            obs->sendNow = true;
-            obs->waitingForAck = false;
-            anyMarkedSendNow = true;
+            if (obs->waitingForAck) {
+                // A CON is currently in flight. Don't clobber its
+                // messageId/retransmission state — coalesce the new state
+                // into the pending slot. It will be promoted to the
+                // current notification once the in-flight CON is ACKed.
+                if (obs->pendingPayload) {
+                    server->allocator.free(obs->pendingPayload);
+                }
+                obs->pendingValid = true;
+                obs->pendingCode = code;
+                obs->pendingHasContentFormat = true;
+                obs->pendingContentFormat = contentFormat;
+                obs->pendingPayload = newPayload;
+                obs->pendingPayloadLength = newPayload ? payloadLength : 0;
+            } else {
+                if (obs->payload) {
+                    server->allocator.free(obs->payload);
+                    obs->payload = NULL;
+                    obs->payloadLength = 0;
+                }
+                obs->sequenceNumber++;
+                obs->code = code;
+                obs->hasContentFormat = true;
+                obs->contentFormat = contentFormat;
+                obs->payload = newPayload;
+                obs->payloadLength = newPayload ? payloadLength : 0;
+                obs->messageId = nabto_coap_server_next_message_id(requests);
+                obs->retransmissions = 0;
+                obs->sendNow = true;
+                anyMarkedSendNow = true;
+            }
         }
         obs = obs->next;
     }

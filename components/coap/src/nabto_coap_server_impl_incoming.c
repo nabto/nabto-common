@@ -90,7 +90,7 @@ void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests
         struct nabto_coap_server_observer* obs = requests->observersSentinel->next;
         while (obs != requests->observersSentinel) {
             if (obs->connection == connection && obs->messageId == msg.messageId) {
-                // Notification was acknowledged, clear pending state
+                // Notification was acknowledged, clear in-flight state.
                 struct nabto_coap_server* server = requests->server;
                 if (obs->payload) {
                     server->allocator.free(obs->payload);
@@ -99,6 +99,14 @@ void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests
                 }
                 obs->sendNow = false;
                 obs->waitingForAck = false;
+
+                // If a newer notification was coalesced while the CON was
+                // in flight, promote it now and wake the event loop so
+                // it is sent as a fresh CON.
+                if (obs->pendingValid) {
+                    nabto_coap_server_observer_promote_pending(requests, obs);
+                    requests->notifyEvent(requests->userData);
+                }
                 return;
             }
             obs = obs->next;

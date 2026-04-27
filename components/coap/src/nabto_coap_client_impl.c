@@ -68,11 +68,17 @@ void nabto_coap_client_handle_callback(struct nabto_coap_client* client)
     while(iterator != client->requestsSentinel) {
         if (iterator->state == NABTO_COAP_CLIENT_REQUEST_STATE_DONE_CALLBACK) {
             if (iterator->isObserve && !iterator->observeDeregister &&
+                iterator->response != NULL && iterator->response->hasObserve &&
                 iterator->status != NABTO_COAP_CLIENT_STATUS_STOPPED &&
                 iterator->status != NABTO_COAP_CLIENT_STATUS_TIMEOUT) {
                 // Observe notification: keep request alive for more
-                // notifications. Idle-timeout while observing is suppressed
-                // by request_need_wait(); the caller's configured timeout is
+                // notifications. Only re-arm when the response actually
+                // carries the Observe option — otherwise the server didn't
+                // honor the registration (or returned an error) and the
+                // request must complete normally so it doesn't get stuck
+                // in WAIT_RESPONSE forever.
+                // Idle-timeout while observing is suppressed by
+                // request_need_wait(); the caller's configured timeout is
                 // preserved so a later deregister exchange still times out.
                 iterator->state = NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE;
                 iterator->status = NABTO_COAP_CLIENT_STATUS_OBSERVE_NOTIFICATION;
