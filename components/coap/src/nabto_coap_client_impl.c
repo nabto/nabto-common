@@ -5,11 +5,11 @@ static struct nabto_coap_client_request* nabto_coap_client_find_request(struct n
 
 static bool nabto_coap_client_request_need_send(struct nabto_coap_client_request* request, uint32_t now);
 static bool nabto_coap_client_request_need_wait(struct nabto_coap_client_request* requst);
-void nabto_coap_client_response_free(struct nabto_coap_client_response* response);
+static void nabto_coap_client_response_free(struct nabto_coap_client_response* response);
 
 static uint8_t* nabto_coap_client_request_create_packet(struct nabto_coap_client_request* request, uint32_t now, uint8_t* buffer, uint8_t* end, void** connection);
 
-uint16_t nabto_coap_client_next_message_id(struct nabto_coap_client* client);
+static uint16_t nabto_coap_client_next_message_id(struct nabto_coap_client* client);
 
 /********************************************************************
  * Implementation of functions used from the coap client integrator *
@@ -70,10 +70,12 @@ void nabto_coap_client_handle_callback(struct nabto_coap_client* client)
             if (iterator->isObserve && !iterator->observeDeregister &&
                 iterator->status != NABTO_COAP_CLIENT_STATUS_STOPPED &&
                 iterator->status != NABTO_COAP_CLIENT_STATUS_TIMEOUT) {
-                // Observe notification: keep request alive for more notifications
+                // Observe notification: keep request alive for more
+                // notifications. Idle-timeout while observing is suppressed
+                // by request_need_wait(); the caller's configured timeout is
+                // preserved so a later deregister exchange still times out.
                 iterator->state = NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE;
                 iterator->status = NABTO_COAP_CLIENT_STATUS_OBSERVE_NOTIFICATION;
-                iterator->configuredTimeoutMilliseconds = 0; // no timeout while observing
                 iterator->endHandler(iterator, iterator->endHandlerUserData);
             } else {
                 iterator->state = NABTO_COAP_CLIENT_REQUEST_STATE_DONE;
@@ -134,6 +136,15 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
 {
     struct nabto_coap_client_response* response = request->response;
     struct nabto_coap_client* client = request->client;
+
+    // A message is the start of a fresh response unless it is a Block2
+    // continuation (Block2 with non-zero offset). For a fresh response we
+    // must clear any stale payload/options carried over from a previous
+    // exchange (notably, earlier observe notifications reuse the same
+    // response struct).
+    bool isFreshResponse =
+        !(message->hasBlock2 && NABTO_COAP_BLOCK_OFFSET(message->block2) > 0);
+
     if (response == NULL) {
         response = client->allocator.calloc(1, sizeof(struct nabto_coap_client_response));
         if (response == NULL) {
@@ -141,6 +152,16 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
         }
         response->request = request;
         request->response = response;
+    } else if (isFreshResponse) {
+        if (response->payload) {
+            client->allocator.free(response->payload);
+            response->payload = NULL;
+        }
+        response->payloadLength = 0;
+        response->hasContentFormat = false;
+        response->hasObserve = false;
+        request->hasBlock2 = false;
+        request->block2 = 0;
     }
 
     response->code = message->code;
@@ -493,8 +514,16 @@ bool nabto_coap_client_request_need_wait(struct nabto_coap_client_request* reque
     if (request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_ACK) {
         return true;
     }
-    if ( request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE && request->configuredTimeoutMilliseconds != 0) {
-        return true;
+    if (request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE) {
+        // While observing (waiting for the next notification), there is no
+        // idle timeout. Once a deregister has been initiated we revert to
+        // the configured timeout for the deregister exchange.
+        if (request->isObserve && !request->observeDeregister) {
+            return false;
+        }
+        if (request->configuredTimeoutMilliseconds != 0) {
+            return true;
+        }
     }
     return false;
 }
@@ -629,7 +658,7 @@ void nabto_coap_client_request_cancel(struct nabto_coap_client_request* request)
 }
 
 
-void nabto_coap_client_response_free(struct nabto_coap_client_response* response) {
+static void nabto_coap_client_response_free(struct nabto_coap_client_response* response) {
     struct nabto_coap_client* client = response->request->client;
     if (response->payloadLength != 0) {
         client->allocator.free(response->payload);
@@ -796,7 +825,7 @@ bool nabto_coap_client_response_get_payload(struct nabto_coap_client_response* r
     return false;
 }
 
-uint16_t nabto_coap_client_next_message_id(struct nabto_coap_client* client)
+static uint16_t nabto_coap_client_next_message_id(struct nabto_coap_client* client)
 {
     client->messageIdCounter++;
     return client->messageIdCounter;

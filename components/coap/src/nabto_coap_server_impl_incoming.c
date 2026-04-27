@@ -98,6 +98,7 @@ void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests
                     obs->payloadLength = 0;
                 }
                 obs->sendNow = false;
+                obs->waitingForAck = false;
                 return;
             }
             obs = obs->next;

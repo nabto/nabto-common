@@ -18,6 +18,7 @@ struct nabto_coap_server_observer {
     uint32_t sequenceNumber;
     // Notification state
     bool sendNow;
+    bool waitingForAck; // CON notification sent, waiting for ACK/timeout/RST
     uint8_t retransmissions;
     uint32_t timeout;
     uint16_t messageId;
