@@ -100,7 +100,9 @@ struct nn_string_map_iterator nn_string_map_getn(const struct nn_string_map* map
          nn_llist_next(&it))
     {
         struct nn_string_map_item* item = nn_llist_get_item(&it);
-        if (strncmp(item->key, key, keyLength) == 0) {
+        // strncmp alone is a prefix match; the stored key must also end
+        // where the lookup key does.
+        if (strncmp(item->key, key, keyLength) == 0 && item->key[keyLength] == '\0') {
             struct nn_string_map_iterator ret;
             ret.it = it;
             return ret;

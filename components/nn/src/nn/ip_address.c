@@ -74,52 +74,46 @@ static bool is_digit(const char c)
     return c >= '0' && c <= '9';
 }
 
-static const char* read_number(const char* ptr, uint32_t* number)
+static const char* read_octet(const char* ptr, uint8_t* octet)
 {
-    // read the number and return the position after the number.
+    // read one decimal octet, at most three digits and at most 255, and
+    // return the position after it. NULL if there is no valid octet.
     uint32_t n = 0;
-    uint32_t base = 10;
-    for(;;) {
-        if (is_digit(*ptr)) {
-            n = (n * base) + (uint32_t)((*ptr) - '0');
-            ptr++;
-        } else {
-            *number = n;
-            return ptr;
-        }
+    size_t digits = 0;
+    while (is_digit(*ptr) && digits < 3) {
+        n = (n * 10) + (uint32_t)((*ptr) - '0');
+        ptr++;
+        digits++;
     }
+    if (digits == 0 || n > 255) {
+        return NULL;
+    }
+    *octet = (uint8_t)n;
+    return ptr;
 }
 
 bool nn_ip_address_read_v4(const char* str, struct nn_ip_address* ip)
 {
-    // read an ip of the form a.b.c.d
+    // read an ip of the form a.b.c.d, the whole string must be consumed.
     const char* ptr = str;
-    uint32_t a;
-    uint32_t b;
-    uint32_t c;
-    uint32_t d;
-    ptr = read_number(ptr, &a);
-    if (*ptr != '.') {
+    uint8_t octets[4];
+    for (size_t i = 0; i < 4; i++) {
+        if (i > 0) {
+            if (*ptr != '.') {
+                return false;
+            }
+            ptr++;
+        }
+        ptr = read_octet(ptr, &octets[i]);
+        if (ptr == NULL) {
+            return false;
+        }
+    }
+    if (*ptr != '\0') {
         return false;
     }
-    ptr++;
-    ptr = read_number(ptr, &b);
-    if (*ptr != '.') {
-        return false;
-    }
-    ptr++;
-    ptr = read_number(ptr, &c);
-    if (*ptr != '.') {
-        return false;
-    }
-    ptr++;
-    ptr = read_number(ptr, &d);
 
-    ip->ip.v4[0] = (uint8_t)a;
-    ip->ip.v4[1] = (uint8_t)b;
-    ip->ip.v4[2] = (uint8_t)c;
-    ip->ip.v4[3] = (uint8_t)d;
-
+    memcpy(ip->ip.v4, octets, 4);
     ip->type = NN_IPV4;
     return true;
 }

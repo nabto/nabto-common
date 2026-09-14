@@ -58,7 +58,10 @@ const char* nn_ip_address_to_string(const struct nn_ip_address* ip);
 void nn_ip_address_assign_v4(struct nn_ip_address* ip, uint32_t address);
 
 /**
- * Read an ipv4 address from a string on the form a.b.c.d
+ * Read an ipv4 address from a string on the form a.b.c.d. Each part is
+ * a decimal number in the range 0-255 and the whole string must be
+ * consumed; nothing may follow the last part. The ip is only written
+ * when the string is accepted.
  *
  * @return true iff the ip is read from the string.
  */

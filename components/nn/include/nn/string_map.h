@@ -42,6 +42,12 @@ void nn_string_map_deinit(struct nn_string_map* map);
  * If an item with the key exists return an iterator pointing at the device else return an iterator which is end.
  */
 struct nn_string_map_iterator nn_string_map_get(const struct nn_string_map* map, const char* key);
+
+/**
+ * As nn_string_map_get, but the key is the first keyLength bytes of key
+ * and need not be null terminated. The stored key must match it in
+ * full; a stored key which merely starts with it is not a match.
+ */
 struct nn_string_map_iterator nn_string_map_getn(const struct nn_string_map* map, const char* key, size_t keyLength);
 
 /**
