@@ -31,7 +31,9 @@ bool nn_vector_push_back(struct nn_vector* vector, void* element)
         if (newElements == NULL) {
             return false;
         }
-        memcpy(newElements, vector->elements, (vector->capacity * vector->itemSize));
+        if (vector->elements != NULL) {
+            memcpy(newElements, vector->elements, (vector->capacity * vector->itemSize));
+        }
         vector->allocator.free(vector->elements);
         vector->elements = newElements;
         vector->capacity = newCapacity;

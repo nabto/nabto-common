@@ -180,7 +180,7 @@ void nabto_stream_update_congestion_control_receive_stats(struct nabto_stream* s
         nabto_stream_stats_observe(&stream->ccStats.rtt, time);
         stream->cCtrl.rto = (uint32_t)(stream->cCtrl.srtt + 4.0*stream->cCtrl.rttVar);
 
-        NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "packet time %f, stream->srtt %f, stream->rttVar %f, stream->rto %" NN_LOG_PRIu16, time, stream->cCtrl.srtt, stream->cCtrl.rttVar, stream->cCtrl.rto);
+        NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "packet time %f, stream->srtt %f, stream->rttVar %f, stream->rto %" NN_LOG_PRIu32, time, stream->cCtrl.srtt, stream->cCtrl.rttVar, stream->cCtrl.rto);
 
 
         /**

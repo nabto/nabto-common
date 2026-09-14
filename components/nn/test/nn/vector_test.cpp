@@ -81,6 +81,29 @@ BOOST_AUTO_TEST_CASE(iterator)
     nn_vector_deinit(&vector);
 }
 
+BOOST_AUTO_TEST_CASE(push_back_on_empty_vector)
+{
+    // The first push_back grows the capacity from 0 and used to copy from
+    // the NULL elements pointer; UBSan reports that even for 0 bytes.
+    struct nn_vector vector;
+    nn_vector_init(&vector, sizeof(int), &defaultAllocator);
+
+    int foo = 42;
+    int bar = 43;
+    BOOST_TEST(nn_vector_push_back(&vector, &foo));
+    BOOST_TEST(nn_vector_size(&vector) == (size_t)1);
+    BOOST_TEST(nn_vector_push_back(&vector, &bar));
+    BOOST_TEST(nn_vector_size(&vector) == (size_t)2);
+
+    int element;
+    nn_vector_get(&vector, 0, &element);
+    BOOST_TEST(element == foo);
+    nn_vector_get(&vector, 1, &element);
+    BOOST_TEST(element == bar);
+
+    nn_vector_deinit(&vector);
+}
+
 #define BLOCK_SIZE 42
 struct large_element {
     uint8_t block[BLOCK_SIZE];
