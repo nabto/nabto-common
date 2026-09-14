@@ -1,5 +1,4 @@
-cmake_minimum_required(VERSION 3.24)
-cmake_policy(SET CMP0167 NEW)
+cmake_minimum_required(VERSION 3.30)
 project(nabto_coap_ci_build)
 
 option(NABTO_COAP_SANITIZE "Build the library and tests with AddressSanitizer and UndefinedBehaviorSanitizer" ON)
