@@ -18,6 +18,8 @@ static uint8_t* nabto_mdns_server_string_write_forward(uint8_t* buf, uint8_t* en
 
 static uint8_t* nabto_mdns_server_encode_string(uint8_t* buf, uint8_t* end, const char* string);
 
+static uint16_t nabto_mdns_server_compression_label(const uint8_t* buffer, const uint8_t* ptr);
+
 void nabto_mdns_server_init(struct nabto_mdns_server_context* context)
 {
     memset(context, 0, sizeof(struct nabto_mdns_server_context));
@@ -242,18 +244,18 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 0); // 0 additional response records
 
     // insert ptr record for nabto
-    nabtoLabel = 0xC000 + (uint16_t)(ptr - buffer);
+    nabtoLabel = nabto_mdns_server_compression_label(buffer, ptr);
     ptr = nabto_mdns_server_encode_string(ptr, end, "_nabto");
-    udpLabel = 0xC000 + (uint16_t)(ptr - buffer);
+    udpLabel = nabto_mdns_server_compression_label(buffer, ptr);
     ptr = nabto_mdns_server_encode_string(ptr, end, "_udp");
-    localLabel = 0xC000 + (uint16_t)(ptr - buffer);
+    localLabel = nabto_mdns_server_compression_label(buffer, ptr);
     ptr = nabto_mdns_server_encode_string(ptr, end, "local");
-    *ptr = 0; ptr++; // terminate labels
+    ptr = nabto_mdns_server_uint8_write_forward(ptr, end, 0); // terminate labels
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, NABTO_MDNS_PTR);
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 1); // IN class
     ptr = nabto_mdns_server_uint32_write_forward(ptr, end, ttl); // TTL
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, (uint16_t)(instanceNameLength+3)); // size of (service name length (1byte) + service name + compression label(2bytes))
-    serviceLabel = 0xC000 + (uint16_t)(ptr - buffer);
+    serviceLabel = nabto_mdns_server_compression_label(buffer, ptr);
     ptr = nabto_mdns_server_encode_string(ptr, end, instanceName);
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 0xC00C); // Compression label (0xC000 + header size)
 
@@ -264,7 +266,7 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     NN_STRING_SET_FOREACH(subtype, context->subtypes) {
         ptr = nabto_mdns_server_encode_string(ptr, end, subtype);
         if (subLabel == 0) {
-            subLabel = 0xC000 + (uint16_t)(ptr - buffer);
+            subLabel = nabto_mdns_server_compression_label(buffer, ptr);
             ptr = nabto_mdns_server_encode_string(ptr, end, "_sub");
             ptr = nabto_mdns_server_uint16_write_forward(ptr, end, nabtoLabel); // Compression label
         } else {
@@ -297,7 +299,7 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 0); // prio
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 0); // weight
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, port); // port
-    domainLabel = 0xC000 + (uint16_t)(ptr - buffer);
+    domainLabel = nabto_mdns_server_compression_label(buffer, ptr);
     ptr = nabto_mdns_server_encode_string(ptr, end, instanceName);
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, localLabel); // Compression label
 
@@ -356,8 +358,25 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
             return false;
         }
     }
+    if (ptr == NULL) {
+        // the packet did not fit in the buffer
+        return false;
+    }
     *written = ptr - buffer;
     return true;
+}
+
+/**
+ * Compression label pointing at the current write position. Once a
+ * write has failed ptr is NULL, the label is then meaningless but the
+ * whole packet is rejected at the end of build_packet anyway.
+ */
+uint16_t nabto_mdns_server_compression_label(const uint8_t* buffer, const uint8_t* ptr)
+{
+    if (ptr == NULL) {
+        return 0;
+    }
+    return 0xC000 + (uint16_t)(ptr - buffer);
 }
 
 
