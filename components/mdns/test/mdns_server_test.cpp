@@ -4,6 +4,8 @@
 #include <nn/string_map.h>
 #include <nn/string_set.h>
 
+#include <pthread.h>
+
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -404,6 +406,78 @@ BOOST_AUTO_TEST_CASE(compressed_name_is_matched)
     q.compressedQuestion({ "_nabto" }, udpOffset);
     uint16_t id = 0;
     BOOST_TEST(handle(s, q, &id));
+}
+
+// Build a query with `questions` questions, each of whose name is a single
+// compression pointer to the previous question's name. Question 0 points
+// into the header (an empty name), so nothing matches and the packet is
+// rejected. The names form a backwards pointer chain of increasing length,
+// so matching the last question follows ~`questions` pointers. On the
+// unfixed recursive `match_name` that is one stack frame per pointer; the
+// bounded loop follows at most NABTO_MDNS_MAX_COMPRESSION_HOPS.
+//
+// A pointer chain has to be entered from a high offset to be deep — a name
+// at the first question's offset can only point backwards into the 12-byte
+// header — which is why the depth is built up across many questions rather
+// than inside one name.
+std::vector<uint8_t> deepCompressionChainPacket(size_t questions)
+{
+    std::vector<uint8_t> b;
+    auto put16 = [&](uint16_t v) { b.push_back((uint8_t)(v >> 8)); b.push_back((uint8_t)(v & 0xff)); };
+
+    put16(0x4242);             // id
+    put16(0);                  // flags (query)
+    put16((uint16_t)questions);// qdcount
+    put16(0);                  // ancount
+    put16(0);                  // nscount
+    put16(0);                  // arcount
+
+    for (size_t i = 0; i < questions; i++) {
+        size_t off = b.size();
+        // Question 0 -> offset 10 (a zero byte in the header = empty name);
+        // question i -> question i-1's name (6 bytes earlier).
+        uint16_t target = (i == 0) ? 10 : (uint16_t)(off - 6);
+        put16(0xC000 | target);
+        put16(NABTO_MDNS_PTR);
+        put16(MDNS_CLASS_IN);
+    }
+    return b;
+}
+
+struct DeepChainArg {
+    struct nabto_mdns_server_context* ctx;
+    const uint8_t* data;
+    size_t size;
+    bool matched;
+};
+
+extern "C" void* runHandlePacket(void* p)
+{
+    DeepChainArg* a = static_cast<DeepChainArg*>(p);
+    uint16_t id = 0;
+    a->matched = nabto_mdns_server_handle_packet(a->ctx, a->data, a->size, &id);
+    return nullptr;
+}
+
+BOOST_AUTO_TEST_CASE(deep_compression_pointer_chain_is_rejected)
+{
+    TestServer s;
+    // The 14-bit compression offset caps the chain at ~2700 questions,
+    // which is a ~2700-deep recursion on the unfixed code. Run it on a
+    // 128 KiB stack: that recursion overflows it (crashing the test),
+    // while the bounded loop fits comfortably.
+    std::vector<uint8_t> packet = deepCompressionChainPacket(2728);
+    DeepChainArg arg = { &s.ctx, packet.data(), packet.size(), true };
+
+    pthread_attr_t attr;
+    BOOST_REQUIRE_EQUAL(pthread_attr_init(&attr), 0);
+    BOOST_REQUIRE_EQUAL(pthread_attr_setstacksize(&attr, 128 * 1024), 0);
+    pthread_t thread;
+    BOOST_REQUIRE_EQUAL(pthread_create(&thread, &attr, runHandlePacket, &arg), 0);
+    BOOST_REQUIRE_EQUAL(pthread_join(thread, nullptr), 0);
+    pthread_attr_destroy(&attr);
+
+    BOOST_TEST(!arg.matched);
 }
 
 BOOST_AUTO_TEST_CASE(forward_compression_pointer_is_rejected)
