@@ -121,6 +121,22 @@ class PacketBuilder {
         return ext(type, be32(value));
     }
 
+    /** Append bytes as is, for deliberately broken extension framing. */
+    PacketBuilder& raw(const std::vector<uint8_t>& bytes)
+    {
+        bytes_.insert(bytes_.end(), bytes.begin(), bytes.end());
+        return *this;
+    }
+
+    /** An extension header declaring `declared` payload bytes, followed by `actual` of them. */
+    PacketBuilder& truncatedExt(uint16_t type, uint16_t declared, size_t actual)
+    {
+        u16(type);
+        u16(declared);
+        bytes_.insert(bytes_.end(), actual, 0);
+        return *this;
+    }
+
     std::vector<uint8_t> build() const { return bytes_; }
 
     static std::vector<uint8_t> be32(uint32_t v)
@@ -261,6 +277,77 @@ BOOST_FIXTURE_TEST_CASE(syn_with_short_optional_extensions_uses_defaults, Stream
     BOOST_TEST(stream.maxSendSegmentSize == NABTO_STREAM_DEFAULT_MAX_SEND_SEGMENT_SIZE);
 }
 
+BOOST_AUTO_TEST_CASE(syn_with_truncated_extension_list_is_rejected)
+{
+    // A valid syn extension followed by broken framing: a header declaring
+    // more payload than is left, or a partial header. The old loops treated
+    // this as the end of the list and accepted the syn; with a truncated
+    // NONCE_CAPABILITY that also turned replay protection off.
+    struct Case { const char* name; uint16_t type; uint16_t declared; size_t actual; };
+    const Case cases[] = {
+        { "nonce capability declaring 1 byte, none present", NABTO_STREAM_EXTENSION_NONCE_CAPABILITY, 1, 0 },
+        { "content type declaring 4 bytes, 3 present", NABTO_STREAM_EXTENSION_CONTENT_TYPE, 4, 3 },
+        { "unknown type declaring 100 bytes, 1 present", 0x1fff, 100, 1 },
+    };
+    for (size_t i = 0; i < sizeof(cases)/sizeof(cases[0]); i++) {
+        StreamFixture f;
+        f.responder();
+        std::vector<uint8_t> packet = PacketBuilder(NABTO_STREAM_FLAG_SYN, 42)
+            .ext(NABTO_STREAM_EXTENSION_SYN, 0x11223344u)
+            .truncatedExt(cases[i].type, cases[i].declared, cases[i].actual)
+            .build();
+        handle(&f.stream, packet);
+
+        BOOST_TEST(f.stream.state == ST_IDLE, cases[i].name);
+        BOOST_TEST(!f.stream.disableReplayProtection, cases[i].name);
+        BOOST_TEST(f.stream.receivedPackets == 0u, cases[i].name);
+    }
+
+    // 1..3 stray bytes after the last extension: not enough for a header.
+    for (size_t stray = 1; stray < 4; stray++) {
+        StreamFixture f;
+        f.responder();
+        std::vector<uint8_t> packet = PacketBuilder(NABTO_STREAM_FLAG_SYN, 42)
+            .ext(NABTO_STREAM_EXTENSION_SYN, 0x11223344u)
+            .raw(std::vector<uint8_t>(stray, 0))
+            .build();
+        handle(&f.stream, packet);
+
+        BOOST_TEST(f.stream.state == ST_IDLE, "stray " << stray);
+        BOOST_TEST(f.stream.receivedPackets == 0u, "stray " << stray);
+    }
+
+    // control: a complete, empty nonce capability keeps replay protection on.
+    StreamFixture f;
+    f.responder();
+    std::vector<uint8_t> packet = PacketBuilder(NABTO_STREAM_FLAG_SYN, 42)
+        .ext(NABTO_STREAM_EXTENSION_SYN, 0x11223344u)
+        .ext(NABTO_STREAM_EXTENSION_NONCE_CAPABILITY, std::vector<uint8_t>())
+        .build();
+    handle(&f.stream, packet);
+    BOOST_TEST(f.stream.state == ST_ACCEPT);
+    BOOST_TEST(!f.stream.disableReplayProtection);
+    BOOST_TEST(f.stream.receivedPackets == 1u);
+}
+
+BOOST_FIXTURE_TEST_CASE(parse_syn_rejects_truncated_extension_list_itself, StreamFixture)
+{
+    // The parser checks the framing as it reads; it does not rely on the
+    // sanity check in nabto_stream_handle_packet.
+    responder();
+    std::vector<uint8_t> packet = PacketBuilder(NABTO_STREAM_FLAG_SYN, 42)
+        .ext(NABTO_STREAM_EXTENSION_SYN, 0x11223344u)
+        .truncatedExt(NABTO_STREAM_EXTENSION_NONCE_CAPABILITY, 1, 0)
+        .build();
+    struct nabto_stream_header hdr;
+    hdr.flags = NABTO_STREAM_FLAG_SYN;
+    hdr.timestampValue = 42;
+    nabto_stream_parse_syn(&stream, packet.data() + 5, packet.data() + packet.size(), &hdr);
+
+    BOOST_TEST(stream.state == ST_IDLE);
+    BOOST_TEST(!stream.disableReplayProtection);
+}
+
 // L7: parse_syn_ack
 
 BOOST_AUTO_TEST_CASE(syn_ack_with_truncated_nonce_is_rejected)
@@ -396,6 +483,25 @@ BOOST_AUTO_TEST_CASE(ack_extension_with_bad_length_is_ignored)
         BOOST_TEST(f.stream.state == ST_ESTABLISHED, "length " << length);
         BOOST_TEST(f.stream.maxAdvertisedWindow == 1000u, "length " << length);
     }
+}
+
+BOOST_FIXTURE_TEST_CASE(ack_with_truncated_extension_list_has_no_effect, StreamFixture)
+{
+    // The ack extension is applied while walking the list, so only the
+    // framing check in nabto_stream_handle_packet keeps a valid ack in front
+    // of a truncated data extension from taking effect.
+    responder();
+    stream.state = ST_SYN_RCVD;
+    stream.nonceValidated = true;
+    std::vector<uint8_t> packet = PacketBuilder(NABTO_STREAM_FLAG_ACK, 42)
+        .ext(NABTO_STREAM_EXTENSION_ACK, ackPayload(0, 1000, 0))
+        .truncatedExt(NABTO_STREAM_EXTENSION_DATA, 10, 2)
+        .build();
+    handle(&stream, packet);
+
+    BOOST_TEST(stream.state == ST_SYN_RCVD);
+    BOOST_TEST(stream.maxAdvertisedWindow == 0u);
+    BOOST_TEST(stream.receivedPackets == 0u);
 }
 
 // L8: add_ack_extension

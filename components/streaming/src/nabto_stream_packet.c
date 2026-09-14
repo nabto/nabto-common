@@ -12,7 +12,7 @@ static uint8_t* nabto_stream_write_data_to_packet(struct nabto_stream* stream, u
 
 static const uint8_t* nabto_stream_read_uint8(const uint8_t* ptr, const uint8_t* end, uint8_t* val)
 {
-    if (ptr == NULL || (ptr + 1) > end) {
+    if (ptr == NULL || (end - ptr) < 1) {
         return NULL;
     }
     *val = ptr[0];
@@ -21,7 +21,7 @@ static const uint8_t* nabto_stream_read_uint8(const uint8_t* ptr, const uint8_t*
 
 static const uint8_t* nabto_stream_read_uint16(const uint8_t* ptr, const uint8_t* end, uint16_t* val)
 {
-    if (ptr == NULL || (ptr + 2) > end) {
+    if (ptr == NULL || (end - ptr) < 2) {
         return NULL;
     }
     *val =
@@ -32,7 +32,7 @@ static const uint8_t* nabto_stream_read_uint16(const uint8_t* ptr, const uint8_t
 
 static const uint8_t* nabto_stream_read_uint32(const uint8_t* ptr, const uint8_t* end, uint32_t* val)
 {
-    if (ptr == NULL || (ptr + 4) > end) {
+    if (ptr == NULL || (end - ptr) < 4) {
         return NULL;
     }
     *val =
@@ -45,7 +45,7 @@ static const uint8_t* nabto_stream_read_uint32(const uint8_t* ptr, const uint8_t
 
 static const uint8_t* nabto_stream_read_nonce(const uint8_t* ptr, const uint8_t* end, uint8_t* nonce)
 {
-    if (ptr == NULL || (ptr + NABTO_STREAM_NONCE_SIZE) > end) {
+    if (ptr == NULL || (end - ptr) < NABTO_STREAM_NONCE_SIZE) {
         return NULL;
     }
     memcpy(nonce, ptr, NABTO_STREAM_NONCE_SIZE);
@@ -54,7 +54,7 @@ static const uint8_t* nabto_stream_read_nonce(const uint8_t* ptr, const uint8_t*
 
 static uint8_t* nabto_stream_write_uint8(uint8_t* ptr, const uint8_t* end, uint8_t val)
 {
-    if (ptr == NULL || (ptr + 1) > end) {
+    if (ptr == NULL || (end - ptr) < 1) {
         return NULL;
     }
     ptr[0] = val;
@@ -63,7 +63,7 @@ static uint8_t* nabto_stream_write_uint8(uint8_t* ptr, const uint8_t* end, uint8
 
 static uint8_t* nabto_stream_write_uint16(uint8_t* ptr, const uint8_t* end, uint16_t val)
 {
-    if (ptr == NULL || (ptr + 2) > end) {
+    if (ptr == NULL || (end - ptr) < 2) {
         return NULL;
     }
     ptr[0] = (uint8_t)(val >> 8);
@@ -73,7 +73,7 @@ static uint8_t* nabto_stream_write_uint16(uint8_t* ptr, const uint8_t* end, uint
 
 static uint8_t* nabto_stream_write_uint32(uint8_t* ptr, const uint8_t* end, uint32_t val)
 {
-    if (ptr == NULL || (ptr + 4) > end) {
+    if (ptr == NULL || (end - ptr) < 4) {
         return NULL;
     }
     ptr[0] = (uint8_t)(val >> 24);
@@ -85,7 +85,7 @@ static uint8_t* nabto_stream_write_uint32(uint8_t* ptr, const uint8_t* end, uint
 
 static uint8_t* nabto_stream_write_nonce(uint8_t* ptr, const uint8_t* end, uint8_t* nonce)
 {
-    if (ptr == NULL || (ptr + 8) > end) {
+    if (ptr == NULL || (end - ptr) < NABTO_STREAM_NONCE_SIZE) {
         return NULL;
     }
     memcpy(ptr, nonce, 8);
@@ -94,11 +94,48 @@ static uint8_t* nabto_stream_write_nonce(uint8_t* ptr, const uint8_t* end, uint8
 
 static uint8_t* nabto_stream_encode_buffer(uint8_t* ptr, const uint8_t* end, const uint8_t* buffer, size_t bufferSize)
 {
-    if (ptr == NULL || (ptr + bufferSize) > end) {
+    if (ptr == NULL || (size_t)(end - ptr) < bufferSize) {
         return NULL;
     }
     memcpy(ptr, buffer, bufferSize);
     return ptr + bufferSize;
+}
+
+/**
+ * Read an extension header and check that the declared payload is inside the
+ * packet. Returns the start of the payload and sets *extEnd to its end, or
+ * NULL if the header or the payload does not fit.
+ */
+static const uint8_t* nabto_stream_read_extension_header(const uint8_t* ptr, const uint8_t* end, uint16_t* type, const uint8_t** extEnd)
+{
+    uint16_t length;
+    ptr = nabto_stream_read_uint16(ptr, end, type);
+    ptr = nabto_stream_read_uint16(ptr, end, &length);
+    if (ptr == NULL || length > (end - ptr)) {
+        return NULL;
+    }
+    *extEnd = ptr + length;
+    return ptr;
+}
+
+/**
+ * Sanity check that every extension in the list is complete. Each parser
+ * checks this itself as it reads, but some of them apply extensions as they
+ * go; rejecting the packet here guarantees a malformed packet has no effect
+ * at all rather than a partial one.
+ */
+static bool nabto_stream_extensions_well_formed(const uint8_t* ptr, const uint8_t* end)
+{
+    while (ptr < end) {
+        uint16_t type;
+        const uint8_t* extEnd;
+        ptr = nabto_stream_read_extension_header(ptr, end, &type, &extEnd);
+        if (ptr == NULL) {
+            return false;
+        }
+        ptr = extEnd;
+    }
+    return true;
 }
 
 void nabto_stream_handle_packet(struct nabto_stream* stream, const uint8_t* packet, size_t packetSize)
@@ -112,6 +149,11 @@ void nabto_stream_handle_packet(struct nabto_stream* stream, const uint8_t* pack
     ptr = nabto_stream_read_uint8(ptr, end, &hdr.flags);
     ptr = nabto_stream_read_uint32(ptr, end, &hdr.timestampValue);
     if (ptr == NULL) {
+        return;
+    }
+
+    if (!nabto_stream_extensions_well_formed(ptr, end)) {
+        NN_LOG_ERROR(stream->module->logger, NABTO_STREAM_LOG_MODULE, "malformed extension list, dropping packet");
         return;
     }
 
@@ -144,16 +186,15 @@ void nabto_stream_parse_syn(struct nabto_stream* stream, const uint8_t* ptr, con
 
     bool hasSeq = false;
 
-    do {
+    while (ptr < end) {
         uint16_t type;
-        uint16_t length;
-        ptr = nabto_stream_read_uint16(ptr, end, &type);
-        ptr = nabto_stream_read_uint16(ptr, end, &length);
-        if (ptr == NULL || length > (end - ptr)) {
-            break;
-        }
         // reads inside an extension are bounded by the extension, not the packet.
-        const uint8_t* extEnd = ptr + length;
+        const uint8_t* extEnd;
+        ptr = nabto_stream_read_extension_header(ptr, end, &type, &extEnd);
+        if (ptr == NULL) {
+            NN_LOG_ERROR(stream->module->logger, NABTO_STREAM_LOG_MODULE, "truncated extension in syn packet");
+            return;
+        }
 
         if (type == NABTO_STREAM_EXTENSION_CONTENT_TYPE) {
             uint32_t contentType;
@@ -178,8 +219,8 @@ void nabto_stream_parse_syn(struct nabto_stream* stream, const uint8_t* ptr, con
             req.hasNonceCapability = true;
         }
 
-        ptr += length;
-    } while (ptr < end);
+        ptr = extEnd;
+    }
 
     if (!hasSeq) {
         NN_LOG_ERROR(stream->module->logger, NABTO_STREAM_LOG_MODULE, "invalid syn packet");
@@ -203,16 +244,15 @@ void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr,
     // ack extensions are applied below, once the whole packet has been validated.
     const uint8_t* begin = ptr;
 
-    do {
+    while (ptr < end) {
         uint16_t type;
-        uint16_t length;
-        ptr = nabto_stream_read_uint16(ptr, end, &type);
-        ptr = nabto_stream_read_uint16(ptr, end, &length);
-        if (ptr == NULL || length > (end - ptr)) {
-            break;
-        }
         // reads inside an extension are bounded by the extension, not the packet.
-        const uint8_t* extEnd = ptr + length;
+        const uint8_t* extEnd;
+        ptr = nabto_stream_read_extension_header(ptr, end, &type, &extEnd);
+        if (ptr == NULL) {
+            NN_LOG_ERROR(stream->module->logger, NABTO_STREAM_LOG_MODULE, "truncated extension in syn|ack packet");
+            return;
+        }
 
         if (type == NABTO_STREAM_EXTENSION_SEGMENT_SIZES) {
             uint16_t sendSize;
@@ -238,8 +278,8 @@ void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr,
                 badNonce = true;
             }
         }
-        ptr += length;
-    } while (ptr < end);
+        ptr = extEnd;
+    }
 
     if (!hasSegmentSizes || !hasSeq || badNonce) {
         NN_LOG_ERROR(stream->module->logger, NABTO_STREAM_LOG_MODULE, "invalid syn|ack packet");
@@ -256,49 +296,45 @@ void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr,
 void nabto_stream_parse_nonce_response(struct nabto_stream* stream, const uint8_t* ptr, const uint8_t* end, struct nabto_stream_header* hdr)
 {
     (void)hdr;
-    do {
+    while (ptr < end) {
         uint16_t type;
-        uint16_t length;
-        ptr = nabto_stream_read_uint16(ptr, end, &type);
-        ptr = nabto_stream_read_uint16(ptr, end, &length);
-        if (ptr == NULL || length > (end - ptr)) {
-            break;
+        const uint8_t* extEnd;
+        ptr = nabto_stream_read_extension_header(ptr, end, &type, &extEnd);
+        if (ptr == NULL) {
+            NN_LOG_ERROR(stream->module->logger, NABTO_STREAM_LOG_MODULE, "truncated extension in ack packet");
+            return;
         }
 
         if (type == NABTO_STREAM_EXTENSION_NONCE_RESPONSE) {
-            const uint8_t* extPtr = ptr;
-            const uint8_t* extEnd = extPtr + length;
-            uint8_t nonce[8];
-            extPtr = nabto_stream_read_nonce(extPtr, extEnd, nonce);
-            if (extPtr != NULL) {
+            uint8_t nonce[NABTO_STREAM_NONCE_SIZE];
+            if (nabto_stream_read_nonce(ptr, extEnd, nonce) != NULL) {
                 if (memcmp(nonce, stream->nonce, NABTO_STREAM_NONCE_SIZE) == 0) {
                     stream->nonceValidated = true;
                 }
             }
-
         }
 
-        ptr += length;
-    } while (ptr < end);
+        ptr = extEnd;
+    }
 }
 
 void nabto_stream_parse_acking(struct nabto_stream* stream, const uint8_t* ptr, const uint8_t* end, struct nabto_stream_header* hdr)
 {
-    do {
+    while (ptr < end) {
         uint16_t type;
-        uint16_t length;
-        ptr = nabto_stream_read_uint16(ptr, end, &type);
-        ptr = nabto_stream_read_uint16(ptr, end, &length);
-        if (ptr == NULL || length > (end - ptr)) {
-            break;
+        const uint8_t* extEnd;
+        ptr = nabto_stream_read_extension_header(ptr, end, &type, &extEnd);
+        if (ptr == NULL) {
+            NN_LOG_ERROR(stream->module->logger, NABTO_STREAM_LOG_MODULE, "truncated extension in ack packet");
+            return;
         }
 
         if (type == NABTO_STREAM_EXTENSION_ACK) {
-            nabto_stream_parse_ack_extension(stream, ptr, length, hdr);
+            nabto_stream_parse_ack_extension(stream, ptr, (uint16_t)(extEnd - ptr), hdr);
         }
 
-        ptr += length;
-    } while (ptr < end);
+        ptr = extEnd;
+    }
 }
 
 void nabto_stream_parse_ack_extension(struct nabto_stream* stream, const uint8_t* ptr, uint16_t length, struct nabto_stream_header* hdr)
@@ -436,25 +472,25 @@ void nabto_stream_parse_ack(struct nabto_stream* stream, const uint8_t* ptr, con
 
     nabto_stream_parse_acking(stream, ptr, end, hdr);
 
-    do {
+    while (ptr < end) {
         uint16_t type;
-        uint16_t length;
-        ptr = nabto_stream_read_uint16(ptr, end, &type);
-        ptr = nabto_stream_read_uint16(ptr, end, &length);
-        if (ptr == NULL || length > (end - ptr)) {
-            break;
+        const uint8_t* extEnd;
+        ptr = nabto_stream_read_extension_header(ptr, end, &type, &extEnd);
+        if (ptr == NULL) {
+            NN_LOG_ERROR(stream->module->logger, NABTO_STREAM_LOG_MODULE, "truncated extension in ack packet");
+            return;
         }
 
         if (type == NABTO_STREAM_EXTENSION_DATA) {
-            nabto_stream_parse_data_extension(stream, ptr, length);
+            nabto_stream_parse_data_extension(stream, ptr, (uint16_t)(extEnd - ptr));
         } else if (type == NABTO_STREAM_EXTENSION_FIN) {
-            nabto_stream_parse_fin_extension(stream, ptr, length);
+            nabto_stream_parse_fin_extension(stream, ptr, (uint16_t)(extEnd - ptr));
         } else {
             // unknown extension
         }
 
-        ptr += length;
-    } while (ptr < end);
+        ptr = extEnd;
+    }
 }
 
 void nabto_stream_parse_data_extension(struct nabto_stream* stream, const uint8_t* ptr, uint16_t length)
@@ -850,20 +886,15 @@ void nabto_stream_dump_packet(struct nabto_stream* stream, const uint8_t* buffer
 
     while (ptr < end) {
         uint16_t extensionType = 0;
-        uint16_t length = 0;
-        ptr = nabto_stream_read_uint16(ptr, end, &extensionType);
-        ptr = nabto_stream_read_uint16(ptr, end, &length);
+        const uint8_t* extEnd;
+        ptr = nabto_stream_read_extension_header(ptr, end, &extensionType, &extEnd);
         if (ptr == NULL) {
-            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Invalid extension formatting in packet");
+            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Truncated extension in packet");
             return;
         }
-        if (ptr + length > end) {
-            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "  Extension is larger than the packet");
-            return;
-        }
+        uint16_t length = (uint16_t)(extEnd - ptr);
 
         const uint8_t* extPtr = ptr;
-        const uint8_t* extEnd = extPtr + length;
 
         if (extensionType == NABTO_STREAM_EXTENSION_ACK) {
             uint32_t maxAcked = 0;
@@ -924,6 +955,6 @@ void nabto_stream_dump_packet(struct nabto_stream* stream, const uint8_t* buffer
         }
 
         // iterate to next extension
-        ptr = ptr + length;
+        ptr = extEnd;
     }
 }
