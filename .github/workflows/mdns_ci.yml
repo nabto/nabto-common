@@ -1,0 +1,36 @@
+name: MDNS-CI
+
+on:
+  push:
+
+jobs:
+  build-and-test:
+    name: Build
+    runs-on: ${{matrix.os}}
+    strategy:
+      matrix:
+        os: [ubuntu-24.04]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Get vcpkg commit
+        id: vcpkg
+        run: echo "sha=$(git rev-parse HEAD:3rdparty/vcpkg)" >> "$GITHUB_OUTPUT"
+      - name: Cache vcpkg binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-${{ runner.os }}-${{ steps.vcpkg.outputs.sha }}-${{ hashFiles('components/mdns/ci-build/vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ steps.vcpkg.outputs.sha }}-
+            vcpkg-${{ runner.os }}-
+      - name: Bootstrap vcpkg
+        run: ./3rdparty/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+      - name: Configure cmake
+        run: cmake -B build -S components/mdns/ci-build -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/3rdparty/vcpkg/scripts/buildsystems/vcpkg.cmake
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ./build/mdns_test --log_level=test_suite
