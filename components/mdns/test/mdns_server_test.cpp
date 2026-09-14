@@ -565,6 +565,39 @@ BOOST_AUTO_TEST_CASE(unicast_response_does_not_set_cache_flush)
     }
 }
 
+BOOST_AUTO_TEST_CASE(build_packet_fails_when_buffer_is_too_small)
+{
+    TestServer s;
+    struct nn_ip_address ips[2] = { v4(192, 168, 1, 10), v6LinkLocal() };
+    uint8_t buf[64];
+    size_t written = 0;
+    BOOST_TEST(!nabto_mdns_server_build_packet(&s.ctx, 1, false, false, ips, 2, 4242, buf, sizeof(buf), &written));
+    BOOST_TEST(!nabto_mdns_server_build_packet(&s.ctx, 1, false, false, ips, 2, 4242, buf, 0, &written));
+}
+
+BOOST_AUTO_TEST_CASE(build_packet_fails_for_every_size_below_the_packet_size)
+{
+    TestServer s;
+    struct nn_ip_address ips[2] = { v4(192, 168, 1, 10), v6LinkLocal() };
+    uint8_t full[1500];
+    size_t fullSize = 0;
+    BOOST_REQUIRE(nabto_mdns_server_build_packet(&s.ctx, 1, false, false, ips, 2, 4242, full, sizeof(full), &fullSize));
+
+    // Undersized buffers must be rejected without writing past them,
+    // an exactly sized buffer must produce the same packet.
+    std::vector<uint8_t> buf(fullSize);
+    for (size_t size = 0; size < fullSize; size++) {
+        size_t written = 0;
+        BOOST_TEST_CONTEXT("buffer size " << size) {
+            BOOST_TEST(!nabto_mdns_server_build_packet(&s.ctx, 1, false, false, ips, 2, 4242, buf.data(), size, &written));
+        }
+    }
+    size_t written = 0;
+    BOOST_TEST(nabto_mdns_server_build_packet(&s.ctx, 1, false, false, ips, 2, 4242, buf.data(), fullSize, &written));
+    BOOST_TEST(written == fullSize);
+    BOOST_TEST(std::equal(buf.begin(), buf.end(), full));
+}
+
 BOOST_AUTO_TEST_CASE(built_response_is_not_handled_as_a_query)
 {
     TestServer s;
