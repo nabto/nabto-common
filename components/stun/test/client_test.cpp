@@ -2,6 +2,7 @@
 #include <nabto_stun/nabto_stun_client.h>
 
 #include <random>
+#include <vector>
 
 #ifdef __cplusplus
 extern "C" {
@@ -372,6 +373,35 @@ BOOST_AUTO_TEST_CASE(client_full_cone_nat)
     BOOST_TEST(r->mapping == STUN_INDEPENDENT);
     BOOST_TEST(r->filtering == STUN_INDEPENDENT);
     BOOST_TEST(r->defectNat == false);
+}
+
+BOOST_AUTO_TEST_CASE(client_no_data_endpoint_after_last_initial_send)
+{
+    // Once every initial request has been sent the client waits, and there
+    // is no endpoint to send to. The endpoints live in a heap array of exactly
+    // numEps entries so an index of numEps is visible to the sanitizer.
+    std::vector<struct nn_endpoint> heapEps(eps, eps + 2);
+    nabto_stun_init(&stun_, &module, this, heapEps.data(), (uint8_t)heapEps.size());
+    nabto_stun_async_analyze(&stun_, true);
+    for (size_t i = 0; i < heapEps.size(); i++) {
+        BOOST_REQUIRE(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_SEND_PRIMARY);
+        BOOST_TEST(nabto_stun_get_data_endpoint(&stun_, &dst));
+        BOOST_TEST(dst.port == heapEps[i].port);
+        BOOST_TEST(nabto_stun_get_send_data(&stun_, reqBuf, sizeof(reqBuf)) == STUN_BINDING_REQUEST_SIZE);
+    }
+    BOOST_TEST(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_WAIT);
+    BOOST_TEST(!nabto_stun_get_data_endpoint(&stun_, &dst));
+}
+
+BOOST_AUTO_TEST_CASE(client_get_send_data_rejects_too_small_buffer)
+{
+    startStunAnalysis(true);
+    BOOST_REQUIRE(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_SEND_PRIMARY);
+    std::vector<uint8_t> buf(STUN_BINDING_REQUEST_SIZE - 1, 0xaa);
+    BOOST_TEST(nabto_stun_get_send_data(&stun_, buf.data(), (uint16_t)buf.size()) == 0);
+    for (uint8_t b : buf) {
+        BOOST_TEST(b == 0xaa);
+    }
 }
 
 BOOST_AUTO_TEST_SUITE_END()

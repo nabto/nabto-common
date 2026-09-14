@@ -28,6 +28,12 @@ enum {
     STUN_MAGIC_COOKIE = 0x2112A442
 };
 
+enum {
+    // size of the binding request written by nabto_stun_write_message:
+    // 20 byte header plus an 8 byte CHANGE-REQUEST attribute
+    STUN_BINDING_REQUEST_SIZE = 28
+};
+
 extern uint8_t STUN_MAGIC_COOKIE_BYTES[4];
 
 enum {
@@ -65,6 +71,10 @@ void nabto_stun_init_message(const struct nabto_stun_module* mod, struct nabto_s
 
 void nabto_stun_message_reset_transaction_id(const struct nabto_stun_module* mod, struct nabto_stun_message* msg, void* modUserData);
 
+/**
+ * Write the binding request for msg to buf. Returns the number of bytes
+ * written, or 0 if size is less than STUN_BINDING_REQUEST_SIZE.
+ */
 uint16_t nabto_stun_write_message(uint8_t* buf, uint16_t size, struct nabto_stun_message* msg);
 
 bool nabto_stun_decode_message(struct nabto_stun_message* msg, const uint8_t* buf, uint16_t size);

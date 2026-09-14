@@ -41,6 +41,10 @@ bool nabto_stun_get_data_endpoint(struct nabto_stun* stun, struct nn_endpoint* e
         case STUN_NOT_STARTED:
             return false;
         case STUN_INITIAL_TEST:
+            if (stun->initialTestsSent >= stun->numEps) {
+                // all initial requests are sent, waiting for a response
+                return false;
+            }
             ep->ip = stun->eps[stun->initialTestsSent].ip;
             ep->port = stun->eps[stun->initialTestsSent].port;
             return true;

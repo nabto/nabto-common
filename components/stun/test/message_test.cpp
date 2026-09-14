@@ -1,9 +1,14 @@
 #include <boost/test/unit_test.hpp>
 #include <nabto_stun/nabto_stun_message.h>
 
+#include <cstring>
+#include <vector>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+const uint8_t* nabto_stun_read_uint16(const uint8_t* ptr, const uint8_t* end, uint16_t* val);
 
 uint8_t* write_forward(uint8_t* buf, uint8_t* val, uint16_t size)
 {
@@ -248,5 +253,63 @@ BOOST_AUTO_TEST_CASE(decode_full_packet)
     BOOST_TEST(msg.altServerEp.port == 4242);
 }
 
+BOOST_AUTO_TEST_CASE(decode_short_address_attribute_at_end_of_packet)
+{
+    // An address attribute needs a reserved byte, a family byte and a port
+    // before it can be rejected on its length. Put a shorter one last in the
+    // packet, in a heap buffer that ends where the attribute does, so any
+    // read past the end shows up under the sanitizer.
+    for (uint16_t attLen = 0; attLen < 4; attLen++) {
+        std::vector<uint8_t> buf(24 + attLen, 0);
+        uint8_t* ptr = buf.data();
+        ptr = uint16_write_forward(ptr, STUN_MESSAGE_BINDING_RESPONSE_SUCCESS);
+        ptr = uint16_write_forward(ptr, 4 + attLen);
+        ptr += 16;
+        ptr = uint16_write_forward(ptr, STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS_ALT);
+        ptr = uint16_write_forward(ptr, attLen);
+
+        struct nabto_stun_message msg;
+        bool res = nabto_stun_decode_message(&msg, buf.data(), (uint16_t)buf.size());
+        BOOST_TEST(!res, "attLen " << attLen);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(decode_unknown_attribute_ending_inside_padding)
+{
+    // Attribute values are padded to 4 bytes. A packet that stops inside the
+    // padding of its last attribute is still accepted and nothing after the
+    // buffer is touched.
+    for (uint16_t attLen = 0; attLen < 8; attLen++) {
+        std::vector<uint8_t> buf(24 + attLen, 0);
+        uint8_t* ptr = buf.data();
+        ptr = uint16_write_forward(ptr, STUN_MESSAGE_BINDING_RESPONSE_SUCCESS);
+        ptr = uint16_write_forward(ptr, 4 + attLen);
+        ptr += 16;
+        ptr = uint16_write_forward(ptr, 0x0022); // SOFTWARE, ignored by the decoder
+        ptr = uint16_write_forward(ptr, attLen);
+
+        struct nabto_stun_message msg;
+        bool res = nabto_stun_decode_message(&msg, buf.data(), (uint16_t)buf.size());
+        BOOST_TEST(res, "attLen " << attLen);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(write_message_rejects_too_small_buffer)
+{
+    struct nabto_stun_message msg;
+    memset(&msg, 0, sizeof(msg));
+    for (uint16_t size = 0; size < STUN_BINDING_REQUEST_SIZE; size++) {
+        std::vector<uint8_t> buf(size, 0xaa);
+        BOOST_TEST(nabto_stun_write_message(buf.data(), size, &msg) == 0, "size " << size);
+        for (uint8_t b : buf) {
+            BOOST_TEST(b == 0xaa);
+        }
+    }
+    std::vector<uint8_t> buf(STUN_BINDING_REQUEST_SIZE, 0xaa);
+    BOOST_TEST(nabto_stun_write_message(buf.data(), (uint16_t)buf.size(), &msg) == STUN_BINDING_REQUEST_SIZE);
+    uint16_t length;
+    BOOST_TEST((nabto_stun_read_uint16(buf.data() + 2, buf.data() + buf.size(), &length) != NULL));
+    BOOST_TEST(length == STUN_BINDING_REQUEST_SIZE - 20);
+}
 
 BOOST_AUTO_TEST_SUITE_END()

@@ -88,9 +88,12 @@ void nabto_stun_message_reset_transaction_id(const struct nabto_stun_module* mod
 
 uint16_t nabto_stun_write_message(uint8_t* buf, uint16_t size, struct nabto_stun_message* msg)
 {
-    (void)size;
     uint8_t* ptr = buf;
     uint32_t bits = 0;
+
+    if (size < STUN_BINDING_REQUEST_SIZE) {
+        return 0;
+    }
 
     ptr = nabto_stun_uint16_write_forward(ptr, STUN_MESSAGE_BINDING_REQUEST);
     ptr = nabto_stun_uint16_write_forward(ptr, 8);
@@ -117,6 +120,9 @@ const uint8_t* nabto_stun_read_endpoint(const uint8_t* buf, uint16_t attLen, str
     const uint8_t* ptr = buf;
     uint8_t family;
     uint16_t port;
+    if (attLen < 2) { // reserved byte and family must be present
+        return NULL;
+    }
     ptr += 1; // first byte must be ignored according to the RFC.
     family = *ptr; ptr += 1;
     ptr = nabto_stun_read_uint16(ptr, buf + attLen, &port);
@@ -196,12 +202,14 @@ bool nabto_stun_decode_message(struct nabto_stun_message* msg, const uint8_t* bu
             return false;
         }
 
-        if (attLen % 4 == 0) {
-            ptr += attLen;
-        } else {
-            // advance ptr by padding
-            ptr += attLen + (4-(attLen % 4));
+        ptr += attLen;
+        // advance ptr by padding to a 4 byte boundary. The packet may end
+        // inside the padding of its last attribute, so do not go past end.
+        uint16_t padding = (4 - (attLen % 4)) % 4;
+        if (padding > (end - ptr)) {
+            padding = (uint16_t)(end - ptr);
         }
+        ptr += padding;
     }
     return true;
 
