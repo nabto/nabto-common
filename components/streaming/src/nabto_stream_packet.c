@@ -200,6 +200,8 @@ void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr,
     bool hasSeq = false;
     bool badNonce = false;
 
+    // ack extensions are applied below, once the whole packet has been validated.
+    const uint8_t* begin = ptr;
 
     do {
         uint16_t type;
@@ -222,8 +224,6 @@ void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr,
                 req.maxRecvSegmentSize = recvSize;
                 hasSegmentSizes = true;
             }
-        } else if (type == NABTO_STREAM_EXTENSION_ACK) {
-            nabto_stream_parse_ack_extension(stream, ptr, length, hdr);
         } else if (type == NABTO_STREAM_EXTENSION_SYN) {
             if (nabto_stream_read_uint32(ptr, extEnd, &req.seq) != NULL) {
                 hasSeq = true;
@@ -246,6 +246,7 @@ void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr,
         return;
     }
 
+    nabto_stream_parse_acking(stream, begin, end, hdr);
     nabto_stream_handle_syn_ack(stream, hdr, &req);
 }
 
@@ -631,16 +632,16 @@ size_t nabto_stream_create_ack_packet(struct nabto_stream* stream, uint8_t* buff
 
     if (stream->sendNonce) {
         ptr = nabto_stream_add_nonce_response_extension(stream, ptr, end);
-        stream->sendNonce = false;
     }
 
     // add ack data.
     ptr = nabto_stream_add_ack_extension(stream, ptr, end);
     if (ptr == NULL) {
         // no room for the ack extension; nothing below must consume segments
-        // for a packet which is not going to be sent.
+        // or the pending nonce for a packet which is not going to be sent.
         return 0;
     }
+    stream->sendNonce = false;
 
     size_t segmentsWritten = 0;
     ptr = nabto_stream_write_data_to_packet(stream, ptr, end, &segmentsWritten, logicalTimestamp);

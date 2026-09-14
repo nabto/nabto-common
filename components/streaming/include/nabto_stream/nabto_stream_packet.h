@@ -22,6 +22,9 @@ void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr,
 
 void nabto_stream_parse_ack(struct nabto_stream* stream, const uint8_t* ptr, const uint8_t* end, struct nabto_stream_header* hdr);
 
+// handle every ack extension in the extension list starting at ptr.
+void nabto_stream_parse_acking(struct nabto_stream* stream, const uint8_t* ptr, const uint8_t* end, struct nabto_stream_header* hdr);
+
 void nabto_stream_parse_data_extension(struct nabto_stream* stream, const uint8_t* ptr, uint16_t length);
 void nabto_stream_parse_fin_extension(struct nabto_stream* stream, const uint8_t* ptr, uint16_t length);
 void nabto_stream_parse_ack_extension(struct nabto_stream* stream, const uint8_t* ptr, uint16_t length, struct nabto_stream_header* hdr);

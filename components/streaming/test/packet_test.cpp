@@ -330,6 +330,33 @@ BOOST_AUTO_TEST_CASE(syn_ack_with_short_segment_sizes_is_rejected)
     }
 }
 
+BOOST_AUTO_TEST_CASE(syn_ack_ack_extension_is_applied_only_when_packet_is_valid)
+{
+    // the ack extension of a syn|ack must not touch the stream when the
+    // packet is rejected for another reason.
+    std::vector<uint8_t> nonce(NONCE, NONCE + NABTO_STREAM_NONCE_SIZE);
+    for (size_t len = NABTO_STREAM_NONCE_SIZE - 1; len <= NABTO_STREAM_NONCE_SIZE; len++) {
+        StreamFixture f;
+        f.initiator();
+        f.stream.state = ST_SYN_SENT;
+        std::vector<uint8_t> packet = PacketBuilder(NABTO_STREAM_FLAG_SYN | NABTO_STREAM_FLAG_ACK, 42)
+            .ext(NABTO_STREAM_EXTENSION_ACK, ackPayload(0, 1000, 0))
+            .ext(NABTO_STREAM_EXTENSION_SEGMENT_SIZES, segmentSizes(200, 200))
+            .ext(NABTO_STREAM_EXTENSION_SYN, 0x11223344u)
+            .ext(NABTO_STREAM_EXTENSION_NONCE, prefix(nonce, len))
+            .build();
+        handle(&f.stream, packet);
+
+        if (len < NABTO_STREAM_NONCE_SIZE) {
+            BOOST_TEST(f.stream.state == ST_SYN_SENT);
+            BOOST_TEST(f.stream.maxAdvertisedWindow == 0u);
+        } else {
+            BOOST_TEST(f.stream.state == ST_ESTABLISHED);
+            BOOST_TEST(f.stream.maxAdvertisedWindow == 1000u);
+        }
+    }
+}
+
 // L7: parse_ack_extension
 
 BOOST_AUTO_TEST_CASE(ack_extension_with_bad_length_is_ignored)
@@ -442,6 +469,28 @@ BOOST_FIXTURE_TEST_CASE(create_ack_packet_with_tiny_buffer_returns_0, StreamFixt
     std::vector<uint8_t> buf(41, 0xff);
     BOOST_TEST(nabto_stream_create_packet(&stream, buf.data(), 41, ET_ACK) == 25u);
     BOOST_TEST(buf[0] == NABTO_STREAM_FLAG_ACK);
+}
+
+BOOST_FIXTURE_TEST_CASE(create_ack_packet_keeps_send_nonce_when_buffer_is_too_small, StreamFixture)
+{
+    // header 5 + nonce response 12 + ack extension 36 = 53 bytes of room
+    // needed. A failed packet must leave the nonce pending for the retry.
+    initiator();
+    stream.state = ST_ESTABLISHED;
+    stream.sendNonce = true;
+    const size_t tooSmall[] = { 16, 17, 41, 52 };
+    for (size_t i = 0; i < sizeof(tooSmall)/sizeof(tooSmall[0]); i++) {
+        size_t n = tooSmall[i];
+        std::vector<uint8_t> buf(n, 0xff);
+        BOOST_TEST(nabto_stream_create_packet(&stream, buf.data(), n, ET_ACK) == 0u, "n " << n);
+        BOOST_TEST(stream.sendNonce, "n " << n);
+    }
+
+    std::vector<uint8_t> buf(53, 0xff);
+    BOOST_TEST(nabto_stream_create_packet(&stream, buf.data(), 53, ET_ACK) == 37u);
+    BOOST_TEST(!stream.sendNonce);
+    BOOST_TEST(readU16(buf.data() + 5) == NABTO_STREAM_EXTENSION_NONCE_RESPONSE);
+    BOOST_TEST(readU16(buf.data() + 17) == NABTO_STREAM_EXTENSION_ACK);
 }
 
 BOOST_FIXTURE_TEST_CASE(create_rst_packet_with_tiny_buffer_returns_0, StreamFixture)
