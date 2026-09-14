@@ -397,7 +397,8 @@ BOOST_AUTO_TEST_CASE(error_to_non_request_is_non_with_fresh_message_id)
 }
 
 // RFC 7252 section 5.4.1: an unrecognized critical option in a CON
-// request gets 4.02 Bad Option; in a NON request it is rejected.
+// request gets 4.02 Bad Option; in a NON request it is rejected with
+// a matching RST (section 4.3).
 BOOST_AUTO_TEST_CASE(unknown_critical_option_gets_bad_option)
 {
     TestServer s;
@@ -412,7 +413,35 @@ BOOST_AUTO_TEST_CASE(unknown_critical_option_gets_bad_option)
     BOOST_TEST(s.handlerCalls == 0u);
 
     s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_NON, NABTO_COAP_CODE_GET, 0x8002, "t2").uriQuery("a=b").build());
-    BOOST_TEST(s.drain().empty());
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_RST);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_EMPTY);
+    BOOST_TEST(sent[0].messageId == 0x8002);
+    BOOST_TEST(sent[0].token.empty());
+    BOOST_TEST(sent[0].payload.empty());
+    BOOST_TEST(s.handlerCalls == 0u);
+}
+
+// Same drop rule for the pending RST as for errors and ACKs.
+BOOST_AUTO_TEST_CASE(pending_rst_is_not_overwritten)
+{
+    TestServer s;
+    std::vector<uint8_t> first = RequestBuilder(NABTO_COAP_TYPE_NON, NABTO_COAP_CODE_GET, 0xa001, "t1").uriQuery("a=b").build();
+    std::vector<uint8_t> second = RequestBuilder(NABTO_COAP_TYPE_NON, NABTO_COAP_CODE_GET, 0xa002, "t2").uriQuery("a=b").build();
+
+    s.handlePacket(first);
+    s.handlePacket(second);
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_RST);
+    BOOST_TEST(sent[0].messageId == 0xa001);
+
+    s.handlePacket(second);
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_RST);
+    BOOST_TEST(sent[0].messageId == 0xa002);
     BOOST_TEST(s.handlerCalls == 0u);
 }
 

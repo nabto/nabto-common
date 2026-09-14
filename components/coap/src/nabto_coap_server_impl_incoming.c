@@ -35,6 +35,12 @@ static void nabto_coap_server_make_error_response(struct nabto_coap_server_reque
  */
 static void nabto_coap_server_queue_ack(struct nabto_coap_server_requests* requests, void* connection, uint16_t messageId);
 
+/**
+ * Queue a RST rejecting a message. Dropped if a RST is already
+ * waiting to be sent.
+ */
+static void nabto_coap_server_queue_rst(struct nabto_coap_server_requests* requests, void* connection, uint16_t messageId);
+
 
 void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests, void* connection, const uint8_t* packet, size_t packetSize)
 {
@@ -46,13 +52,15 @@ void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests
 
     // RFC 7252 section 5.4.1: a request with an unrecognized critical
     // option is answered with 4.02 Bad Option if it is CON, and
-    // rejected (ignored) if it is NON.
+    // rejected with a RST (section 4.3) if it is NON.
     if (msg.type == NABTO_COAP_TYPE_CON ||
         msg.type == NABTO_COAP_TYPE_NON)
     {
         if (!nabto_coap_server_validate_critical_options(&msg)) {
             if (msg.type == NABTO_COAP_TYPE_CON) {
                 nabto_coap_server_make_error_response(requests, connection, &msg, NABTO_COAP_CODE_BAD_OPTION, unsupportedCriticalOption);
+            } else {
+                nabto_coap_server_queue_rst(requests, connection, msg.messageId);
             }
             return;
         }
@@ -198,6 +206,16 @@ void nabto_coap_server_queue_ack(struct nabto_coap_server_requests* requests, vo
     }
     requests->ackConnection = connection;
     requests->ackMessageId = messageId;
+}
+
+void nabto_coap_server_queue_rst(struct nabto_coap_server_requests* requests, void* connection, uint16_t messageId)
+{
+    if (requests->rstConnection != NULL) {
+        // A RST is already waiting to be sent, keep that one.
+        return;
+    }
+    requests->rstConnection = connection;
+    requests->rstMessageId = messageId;
 }
 
 void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests* requests, struct nabto_coap_server_request* request, struct nabto_coap_incoming_message* message)

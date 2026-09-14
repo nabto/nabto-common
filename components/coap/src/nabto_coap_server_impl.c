@@ -183,7 +183,8 @@ void nabto_coap_server_handle_timeout(struct nabto_coap_server_requests* request
 enum nabto_coap_server_next_event nabto_coap_server_next_event(struct nabto_coap_server_requests* requests)
 {
     if (requests->errorConnection != NULL ||
-        requests->ackConnection != NULL) {
+        requests->ackConnection != NULL ||
+        requests->rstConnection != NULL) {
         return NABTO_COAP_SERVER_NEXT_EVENT_SEND;
     }
 
@@ -276,6 +277,10 @@ void* nabto_coap_server_get_connection_send(struct nabto_coap_server_requests* r
         return requests->ackConnection;
     }
 
+    if (requests->rstConnection) {
+        return requests->rstConnection;
+    }
+
     struct nabto_coap_server_request* request = requests->requestsSentinel->next;
     while(request != requests->requestsSentinel) {
         if ((request->state == NABTO_COAP_SERVER_REQUEST_STATE_REQUEST ||
@@ -316,6 +321,23 @@ uint8_t* nabto_coap_server_send_ack(struct nabto_coap_server_requests* requests,
     ptr = nabto_coap_encode_header(&header, ptr, end);
 
     requests->ackConnection = NULL;
+
+    return ptr;
+}
+
+uint8_t* nabto_coap_server_send_rst(struct nabto_coap_server_requests* requests, uint8_t* buffer, uint8_t* end)
+{
+    uint8_t* ptr = buffer;
+
+    struct nabto_coap_message_header header;
+    memset(&header, 0, sizeof(struct nabto_coap_message_header));
+    header.type = NABTO_COAP_TYPE_RST;
+    header.code = NABTO_COAP_CODE_EMPTY;
+    header.messageId = requests->rstMessageId;
+
+    ptr = nabto_coap_encode_header(&header, ptr, end);
+
+    requests->rstConnection = NULL;
 
     return ptr;
 }
@@ -500,6 +522,10 @@ uint8_t* nabto_coap_server_handle_send(struct nabto_coap_server_requests* reques
 
     if (requests->ackConnection) {
         return nabto_coap_server_send_ack(requests, buffer, end);
+    }
+
+    if (requests->rstConnection) {
+        return nabto_coap_server_send_rst(requests, buffer, end);
     }
 
     struct nabto_coap_server_request* request = requests->requestsSentinel->next;
@@ -1029,6 +1055,10 @@ void nabto_coap_server_remove_connection(struct nabto_coap_server_requests* requ
     }
     if (requests->ackConnection == connection) {
         requests->ackConnection = NULL;
+    }
+
+    if (requests->rstConnection == connection) {
+        requests->rstConnection = NULL;
     }
 
     if (requests->errorConnection == connection) {

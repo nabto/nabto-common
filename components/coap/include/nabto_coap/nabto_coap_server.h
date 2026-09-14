@@ -72,6 +72,10 @@ struct nabto_coap_server_requests {
     uint16_t ackMessageId;
     void* ackConnection;
 
+    // At most one pending RST, same drop rule as above.
+    uint16_t rstMessageId;
+    void* rstConnection;
+
     size_t maxRequests; // max concurrent requests
     size_t activeRequests;
 
