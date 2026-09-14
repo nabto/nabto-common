@@ -53,10 +53,20 @@ void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests
     if (msg.type == NABTO_COAP_TYPE_CON || msg.type == NABTO_COAP_TYPE_NON) {
 
         if (request && request->messageId == msg.messageId) {
-            // retransmission of a request.
+            // Duplicate of a request we have already processed. RFC 7252
+            // section 4.5: acknowledge it with the same ACK as the original,
+            // but process the request only once.
             if (msg.type == NABTO_COAP_TYPE_CON) {
-                requests->ackConnection = connection;
-                requests->ackMessageId = msg.messageId;
+                if (request->state == NABTO_COAP_SERVER_REQUEST_STATE_REQUEST &&
+                    NABTO_COAP_BLOCK_MORE(request->block1Ack))
+                {
+                    // An intermediate Block1 chunk was originally answered
+                    // with a piggybacked 2.31 Continue, resend that.
+                    request->hasBlock1Ack = true;
+                } else {
+                    requests->ackConnection = connection;
+                    requests->ackMessageId = msg.messageId;
+                }
             }
             return;
         }
@@ -297,6 +307,7 @@ struct nabto_coap_server_request* nabto_coap_server_handle_new_request(struct na
     request->type = message->type;
     request->method = message->code;
     request->token = message->token;
+    request->messageId = message->messageId;
     request->resource = resource;
 
     // Detect observe registration (GET + Observe=0)
