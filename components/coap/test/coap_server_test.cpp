@@ -14,8 +14,6 @@ struct nn_allocator defaultAllocator = {
     &free
 };
 
-const uint8_t URI_PATH_TO_BLOCK1 = NABTO_COAP_OPTION_BLOCK1 - NABTO_COAP_OPTION_URI_PATH;
-
 nabto_coap_token makeToken(const std::string& s)
 {
     nabto_coap_token t;
@@ -31,11 +29,11 @@ uint32_t block1Option(uint32_t num, bool more, uint32_t szx)
 }
 
 /**
- * Builds a request for the resource /test.
+ * Builds a request with a single Uri-Path segment, /test by default.
  */
 class RequestBuilder {
  public:
-    RequestBuilder(nabto_coap_type type, nabto_coap_code code, uint16_t messageId, const std::string& token)
+    RequestBuilder(nabto_coap_type type, nabto_coap_code code, uint16_t messageId, const std::string& token, const std::string& path = "test")
     {
         struct nabto_coap_message_header header;
         memset(&header, 0, sizeof(header));
@@ -45,15 +43,25 @@ class RequestBuilder {
         header.token = makeToken(token);
         ptr_ = nabto_coap_encode_header(&header, buffer_, end());
         BOOST_REQUIRE(ptr_ != NULL);
-        const char* path = "test";
-        ptr_ = nabto_coap_encode_option(NABTO_COAP_OPTION_URI_PATH, (const uint8_t*)path, strlen(path), ptr_, end());
+        ptr_ = nabto_coap_encode_option(NABTO_COAP_OPTION_URI_PATH - currentOption_, (const uint8_t*)path.data(), path.size(), ptr_, end());
         BOOST_REQUIRE(ptr_ != NULL);
+        currentOption_ = NABTO_COAP_OPTION_URI_PATH;
+    }
+
+    // Uri-Query is critical and not understood by the server.
+    RequestBuilder& uriQuery(const std::string& query)
+    {
+        ptr_ = nabto_coap_encode_option(NABTO_COAP_OPTION_URI_QUERY - currentOption_, (const uint8_t*)query.data(), query.size(), ptr_, end());
+        BOOST_REQUIRE(ptr_ != NULL);
+        currentOption_ = NABTO_COAP_OPTION_URI_QUERY;
+        return *this;
     }
 
     RequestBuilder& block1(uint32_t num, bool more, uint32_t szx)
     {
-        ptr_ = nabto_coap_encode_varint_option(URI_PATH_TO_BLOCK1, block1Option(num, more, szx), ptr_, end());
+        ptr_ = nabto_coap_encode_varint_option(NABTO_COAP_OPTION_BLOCK1 - currentOption_, block1Option(num, more, szx), ptr_, end());
         BOOST_REQUIRE(ptr_ != NULL);
+        currentOption_ = NABTO_COAP_OPTION_BLOCK1;
         return *this;
     }
 
@@ -70,6 +78,7 @@ class RequestBuilder {
     uint8_t* end() { return buffer_ + sizeof(buffer_); }
     uint8_t buffer_[512];
     uint8_t* ptr_;
+    uint16_t currentOption_ = 0;
 };
 
 std::vector<uint8_t> ackPacket(uint16_t messageId)
@@ -92,6 +101,8 @@ struct SentMessage {
     nabto_coap_type type;
     nabto_coap_code code;
     uint16_t messageId;
+    std::string token;
+    std::string payload;
     bool hasBlock1;
     uint32_t block1;
 };
@@ -138,6 +149,10 @@ class TestServer {
             m.type = msg.type;
             m.code = msg.code;
             m.messageId = msg.messageId;
+            m.token = std::string((const char*)msg.token.token, msg.token.tokenLength);
+            if (msg.payload != NULL) {
+                m.payload = std::string((const char*)msg.payload, msg.payloadLength);
+            }
             m.hasBlock1 = msg.hasBlock1;
             m.block1 = msg.block1;
             sent.push_back(m);
@@ -145,15 +160,31 @@ class TestServer {
         return sent;
     }
 
-    // Respond to the pending request and complete the exchange so the
-    // request is released before the server is torn down.
+    // Ask the server to send into a buffer of the given size; returns
+    // what handle_send returned.
+    uint8_t* sendInto(size_t size)
+    {
+        uint8_t buffer[64];
+        BOOST_REQUIRE(size <= sizeof(buffer));
+        return nabto_coap_server_handle_send(&requests, buffer, buffer + size);
+    }
+
+    // Respond to the most recent pending request and complete the
+    // exchange so the request is released before the server is torn down.
     void respondAndFinish(nabto_coap_code code)
     {
-        BOOST_REQUIRE(request != NULL);
-        nabto_coap_server_response_set_code(request, code);
-        BOOST_REQUIRE(nabto_coap_server_response_ready(request) == NABTO_COAP_ERROR_OK);
-        nabto_coap_server_request_free(request);
+        respond(request, code);
         request = NULL;
+        BOOST_TEST(requests.activeRequests == 0u);
+    }
+
+    // Respond to one pending request and complete its exchange.
+    void respond(struct nabto_coap_server_request* r, nabto_coap_code code)
+    {
+        BOOST_REQUIRE(r != NULL);
+        nabto_coap_server_response_set_code(r, code);
+        BOOST_REQUIRE(nabto_coap_server_response_ready(r) == NABTO_COAP_ERROR_OK);
+        nabto_coap_server_request_free(r);
 
         std::vector<SentMessage> sent = drain();
         BOOST_REQUIRE(sent.size() == 1);
@@ -165,14 +196,14 @@ class TestServer {
             now += NABTO_COAP_ACK_TIMEOUT;
             nabto_coap_server_handle_timeout(&requests);
         }
-        BOOST_TEST(requests.activeRequests == 0u);
     }
 
     void* connection() { return &connection_; }
 
     struct nabto_coap_server server;
     struct nabto_coap_server_requests requests;
-    struct nabto_coap_server_request* request = NULL;
+    struct nabto_coap_server_request* request = NULL; // most recent
+    std::vector<struct nabto_coap_server_request*> pendingRequests;
     size_t handlerCalls = 0;
     uint32_t now = 1000;
 
@@ -184,6 +215,7 @@ class TestServer {
         TestServer* self = static_cast<TestServer*>(userData);
         self->handlerCalls++;
         self->request = request;
+        self->pendingRequests.push_back(request);
     }
 
     int connection_;
@@ -284,6 +316,197 @@ BOOST_AUTO_TEST_CASE(retransmitted_non_request_is_ignored)
     BOOST_TEST(s.handlerCalls == 1u);
 
     s.respondAndFinish(NABTO_COAP_CODE_CONTENT);
+}
+
+// The server keeps at most one pending error. A second error before
+// the first has been sent must not overwrite it; the second client
+// retransmits and gets its error afterwards.
+BOOST_AUTO_TEST_CASE(pending_error_is_not_overwritten)
+{
+    TestServer s;
+    std::vector<uint8_t> first = RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x4001, "t1", "nope").build();
+    std::vector<uint8_t> second = RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x4002, "t2", "nope").build();
+
+    s.handlePacket(first);
+    s.handlePacket(second);
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_NOT_FOUND);
+    BOOST_TEST(sent[0].messageId == 0x4001);
+    BOOST_TEST(sent[0].token == "t1");
+
+    s.handlePacket(second);
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_NOT_FOUND);
+    BOOST_TEST(sent[0].messageId == 0x4002);
+    BOOST_TEST(sent[0].token == "t2");
+    BOOST_TEST(s.handlerCalls == 0u);
+}
+
+// Same for the pending empty ACK: two CON requests before the event
+// loop runs must not lose the first ACK.
+BOOST_AUTO_TEST_CASE(pending_ack_is_not_overwritten)
+{
+    TestServer s;
+    std::vector<uint8_t> first = RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x5001, "t1").build();
+    std::vector<uint8_t> second = RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x5002, "t2").build();
+
+    s.handlePacket(first);
+    s.handlePacket(second);
+    BOOST_TEST(s.handlerCalls == 2u);
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_EMPTY);
+    BOOST_TEST(sent[0].messageId == 0x5001);
+
+    // The second client retransmits and is acked without being processed again.
+    s.handlePacket(second);
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_EMPTY);
+    BOOST_TEST(sent[0].messageId == 0x5002);
+    BOOST_TEST(s.handlerCalls == 2u);
+
+    BOOST_REQUIRE(s.pendingRequests.size() == 2);
+    s.respond(s.pendingRequests[0], NABTO_COAP_CODE_CONTENT);
+    s.respond(s.pendingRequests[1], NABTO_COAP_CODE_CONTENT);
+    BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
+// RFC 7252 section 5.2.1: the error response to a CON request is
+// piggybacked in the ACK, carrying the request's message id and token.
+BOOST_AUTO_TEST_CASE(error_to_con_request_is_piggybacked_ack)
+{
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x6001, "t1", "nope").build());
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_NOT_FOUND);
+    BOOST_TEST(sent[0].messageId == 0x6001);
+    BOOST_TEST(sent[0].token == "t1");
+    BOOST_TEST(sent[0].payload.empty());
+}
+
+// RFC 7252 section 5.2.3: the error response to a NON request is a
+// NON with a fresh message id, matched by token.
+BOOST_AUTO_TEST_CASE(error_to_non_request_is_non_with_fresh_message_id)
+{
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_NON, NABTO_COAP_CODE_GET, 0x7001, "t1", "nope").build());
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_NON);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_NOT_FOUND);
+    BOOST_TEST(sent[0].messageId != 0x7001);
+    BOOST_TEST(sent[0].token == "t1");
+}
+
+// RFC 7252 section 5.4.1: an unrecognized critical option in a CON
+// request gets 4.02 Bad Option; in a NON request it is rejected with
+// a matching RST (section 4.3).
+BOOST_AUTO_TEST_CASE(unknown_critical_option_gets_bad_option)
+{
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x8001, "t1").uriQuery("a=b").build());
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_BAD_OPTION);
+    BOOST_TEST(sent[0].messageId == 0x8001);
+    BOOST_TEST(sent[0].token == "t1");
+    BOOST_TEST(sent[0].payload == "Unsupported critical option");
+    BOOST_TEST(s.handlerCalls == 0u);
+
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_NON, NABTO_COAP_CODE_GET, 0x8002, "t2").uriQuery("a=b").build());
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_RST);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_EMPTY);
+    BOOST_TEST(sent[0].messageId == 0x8002);
+    BOOST_TEST(sent[0].token.empty());
+    BOOST_TEST(sent[0].payload.empty());
+    BOOST_TEST(s.handlerCalls == 0u);
+}
+
+// Same drop rule for the pending RST as for errors and ACKs.
+BOOST_AUTO_TEST_CASE(pending_rst_is_not_overwritten)
+{
+    TestServer s;
+    std::vector<uint8_t> first = RequestBuilder(NABTO_COAP_TYPE_NON, NABTO_COAP_CODE_GET, 0xa001, "t1").uriQuery("a=b").build();
+    std::vector<uint8_t> second = RequestBuilder(NABTO_COAP_TYPE_NON, NABTO_COAP_CODE_GET, 0xa002, "t2").uriQuery("a=b").build();
+
+    s.handlePacket(first);
+    s.handlePacket(second);
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_RST);
+    BOOST_TEST(sent[0].messageId == 0xa001);
+
+    s.handlePacket(second);
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_RST);
+    BOOST_TEST(sent[0].messageId == 0xa002);
+    BOOST_TEST(s.handlerCalls == 0u);
+}
+
+// A pending reply that does not fit the send buffer stays pending so
+// the integrator can retry with a larger buffer.
+BOOST_AUTO_TEST_CASE(pending_reply_is_kept_when_send_buffer_is_too_small)
+{
+    {
+        TestServer s;
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xb001, "t1", "nope").build());
+        BOOST_TEST(s.sendInto(2) == (uint8_t*)NULL);
+        BOOST_TEST(nabto_coap_server_next_event(&s.requests) == NABTO_COAP_SERVER_NEXT_EVENT_SEND);
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].code == NABTO_COAP_CODE_NOT_FOUND);
+        BOOST_TEST(sent[0].messageId == 0xb001);
+    }
+    {
+        TestServer s;
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xb002, "t1").build());
+        BOOST_TEST(s.sendInto(2) == (uint8_t*)NULL);
+        BOOST_TEST(nabto_coap_server_next_event(&s.requests) == NABTO_COAP_SERVER_NEXT_EVENT_SEND);
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+        BOOST_TEST(sent[0].code == NABTO_COAP_CODE_EMPTY);
+        BOOST_TEST(sent[0].messageId == 0xb002);
+        s.respondAndFinish(NABTO_COAP_CODE_CONTENT);
+    }
+    {
+        TestServer s;
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_NON, NABTO_COAP_CODE_GET, 0xb003, "t1").uriQuery("a=b").build());
+        BOOST_TEST(s.sendInto(2) == (uint8_t*)NULL);
+        BOOST_TEST(nabto_coap_server_next_event(&s.requests) == NABTO_COAP_SERVER_NEXT_EVENT_SEND);
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_RST);
+        BOOST_TEST(sent[0].messageId == 0xb003);
+    }
+}
+
+// An error without a description must not carry the payload of an
+// earlier error.
+BOOST_AUTO_TEST_CASE(error_without_description_has_no_stale_payload)
+{
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x9001, "t1").uriQuery("a=b").build());
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].payload == "Unsupported critical option");
+
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x9002, "t2", "nope").build());
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_NOT_FOUND);
+    BOOST_TEST(sent[0].payload.empty());
 }
 
 BOOST_AUTO_TEST_SUITE_END()
