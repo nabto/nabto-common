@@ -51,45 +51,60 @@ static bool match_label(const uint8_t* bufferLabel, size_t bufferLabelSize, cons
     return true;
 }
 
+// Maximum number of compression pointers that may be followed while
+// matching a single name. Each pointer must already point strictly
+// backwards, so the chain is finite, but without a cap the length of the
+// chain is bounded only by the packet size and each hop is a recursive
+// call, which lets an attacker exhaust the stack with one multicast
+// packet. RFC 1035 implementations conventionally cap this at 16-64 hops.
+#define NABTO_MDNS_MAX_COMPRESSION_HOPS 16
+
 static bool match_name(const uint8_t* buffer, const uint8_t* end, const uint8_t* ptr, const char** toMatch)
 {
-    const char* label = *toMatch;
-    if (label == NULL) {
-        return true;
-    }
-    uint8_t length;
-    ptr = nabto_mdns_server_uint8_read_forward(ptr, end, &length);
-    if (!ptr) {
-        return false;
-    }
-    if ((length & 0xC0) == 0xC0) {
-        // this is a compression label
-        uint8_t length2;
-        ptr = nabto_mdns_server_uint8_read_forward(ptr, end, &length2);
+    size_t compressionHops = 0;
+    for (;;) {
+        const char* label = *toMatch;
+        if (label == NULL) {
+            return true;
+        }
+        uint8_t length;
+        ptr = nabto_mdns_server_uint8_read_forward(ptr, end, &length);
         if (!ptr) {
             return false;
         }
-        uint16_t offset = length2;
-        offset += ((uint16_t)(length & ~0xC0)) << 8;
+        if ((length & 0xC0) == 0xC0) {
+            // this is a compression label
+            uint8_t length2;
+            ptr = nabto_mdns_server_uint8_read_forward(ptr, end, &length2);
+            if (!ptr) {
+                return false;
+            }
+            uint16_t offset = length2;
+            offset += ((uint16_t)(length & ~0xC0)) << 8;
 
-        size_t currentOffset = ptr - buffer;
-        if (offset >= currentOffset) {
-            // parse error compression labels needs to point to prior labels.
-            return false;
+            size_t currentOffset = ptr - buffer;
+            if (offset >= currentOffset) {
+                // parse error compression labels needs to point to prior labels.
+                return false;
+            }
+            if (compressionHops >= NABTO_MDNS_MAX_COMPRESSION_HOPS) {
+                // too many compression pointers, bail out to bound the work
+                // done for a single name.
+                return false;
+            }
+            compressionHops++;
+            ptr = buffer + offset;
         } else {
-            return match_name(buffer, end, buffer+offset, toMatch);
-        }
-    } else {
-        if (ptr + length > end) {
-            return false;
-        }
+            if (ptr + length > end) {
+                return false;
+            }
 
-        if (match_label(ptr, length, label)) {
-            size_t labelLength = strlen(label);
-
-            return match_name(buffer, end, (ptr+labelLength), (toMatch+1));
-        } else {
-            return false;
+            if (!match_label(ptr, length, label)) {
+                return false;
+            }
+            // match_label required length == strlen(label).
+            ptr += length;
+            toMatch++;
         }
     }
 }
