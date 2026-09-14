@@ -155,12 +155,20 @@ void nabto_stream_parse_syn(struct nabto_stream* stream, const uint8_t* ptr, con
         // reads inside an extension are bounded by the extension, not the packet.
         const uint8_t* extEnd = ptr + length;
 
-        if (type == NABTO_STREAM_EXTENSION_CONTENT_TYPE && length >= 4) {
-            nabto_stream_read_uint32(ptr, extEnd, &req.contentType);
-        } else if (type == NABTO_STREAM_EXTENSION_SEGMENT_SIZES && length >= 4) {
-            const uint8_t* extPtr = ptr;
-            extPtr = nabto_stream_read_uint16(extPtr, extEnd, &req.maxSendSegmentSize);
-            nabto_stream_read_uint16(extPtr, extEnd, &req.maxRecvSegmentSize);
+        if (type == NABTO_STREAM_EXTENSION_CONTENT_TYPE) {
+            uint32_t contentType;
+            if (nabto_stream_read_uint32(ptr, extEnd, &contentType) != NULL) {
+                req.contentType = contentType;
+            }
+        } else if (type == NABTO_STREAM_EXTENSION_SEGMENT_SIZES) {
+            uint16_t sendSize;
+            uint16_t recvSize;
+            const uint8_t* extPtr = nabto_stream_read_uint16(ptr, extEnd, &sendSize);
+            extPtr = nabto_stream_read_uint16(extPtr, extEnd, &recvSize);
+            if (extPtr != NULL) {
+                req.maxSendSegmentSize = sendSize;
+                req.maxRecvSegmentSize = recvSize;
+            }
         } else if (type == NABTO_STREAM_EXTENSION_SYN) {
             // a truncated syn extension leaves hasSeq false and the packet is rejected below.
             if (nabto_stream_read_uint32(ptr, extEnd, &req.seq) != NULL) {
@@ -204,11 +212,16 @@ void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr,
         // reads inside an extension are bounded by the extension, not the packet.
         const uint8_t* extEnd = ptr + length;
 
-        if (type == NABTO_STREAM_EXTENSION_SEGMENT_SIZES && length >= 4) {
-            const uint8_t* extPtr = ptr;
-            extPtr = nabto_stream_read_uint16(extPtr, extEnd, &req.maxSendSegmentSize);
-            nabto_stream_read_uint16(extPtr, extEnd, &req.maxRecvSegmentSize);
-            hasSegmentSizes = true;
+        if (type == NABTO_STREAM_EXTENSION_SEGMENT_SIZES) {
+            uint16_t sendSize;
+            uint16_t recvSize;
+            const uint8_t* extPtr = nabto_stream_read_uint16(ptr, extEnd, &sendSize);
+            extPtr = nabto_stream_read_uint16(extPtr, extEnd, &recvSize);
+            if (extPtr != NULL) {
+                req.maxSendSegmentSize = sendSize;
+                req.maxRecvSegmentSize = recvSize;
+                hasSegmentSizes = true;
+            }
         } else if (type == NABTO_STREAM_EXTENSION_ACK) {
             nabto_stream_parse_ack_extension(stream, ptr, length, hdr);
         } else if (type == NABTO_STREAM_EXTENSION_SYN) {

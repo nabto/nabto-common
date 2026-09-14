@@ -310,6 +310,26 @@ BOOST_AUTO_TEST_CASE(syn_ack_with_truncated_syn_extension_is_rejected)
     }
 }
 
+BOOST_AUTO_TEST_CASE(syn_ack_with_short_segment_sizes_is_rejected)
+{
+    // segment sizes are mandatory in a syn|ack; a short extension counts as
+    // absent and nothing of it is copied into the request.
+    std::vector<uint8_t> sizes = segmentSizes(200, 200);
+    for (size_t len = 0; len < 4; len++) {
+        StreamFixture f;
+        f.initiator();
+        f.stream.state = ST_SYN_SENT;
+        std::vector<uint8_t> packet = PacketBuilder(NABTO_STREAM_FLAG_SYN | NABTO_STREAM_FLAG_ACK, 42)
+            .ext(NABTO_STREAM_EXTENSION_SEGMENT_SIZES, prefix(sizes, len))
+            .ext(NABTO_STREAM_EXTENSION_SYN, 0x11223344u)
+            .build();
+        handle(&f.stream, packet);
+
+        BOOST_TEST(f.stream.state == ST_SYN_SENT, "len " << len);
+        BOOST_TEST(f.stream.maxSendSegmentSize == NABTO_STREAM_DEFAULT_MAX_SEND_SEGMENT_SIZE, "len " << len);
+    }
+}
+
 // L7: parse_ack_extension
 
 BOOST_AUTO_TEST_CASE(ack_extension_with_bad_length_is_ignored)
