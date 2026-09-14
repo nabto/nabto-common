@@ -56,8 +56,10 @@ static bool match_label(const uint8_t* bufferLabel, size_t bufferLabelSize, cons
 // backwards, so the chain is finite, but without a cap the length of the
 // chain is bounded only by the packet size and each hop is a recursive
 // call, which lets an attacker exhaust the stack with one multicast
-// packet. RFC 1035 implementations conventionally cap this at 16-64 hops.
-#define NABTO_MDNS_MAX_COMPRESSION_HOPS 16
+// packet. The names this responder matches are at most 5 labels, so a
+// legitimate query needs only a handful of redirects; 32 leaves ample
+// headroom while still bounding the work for a single name.
+#define NABTO_MDNS_MAX_COMPRESSION_HOPS 32
 
 static bool match_name(const uint8_t* buffer, const uint8_t* end, const uint8_t* ptr, const char** toMatch)
 {
