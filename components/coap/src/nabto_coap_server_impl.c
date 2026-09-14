@@ -326,7 +326,7 @@ uint8_t* nabto_coap_server_send_error(struct nabto_coap_server_requests* request
 
     struct nabto_coap_message_header header;
     memset(&header, 0, sizeof(struct nabto_coap_message_header));
-    header.type = NABTO_COAP_TYPE_NON;
+    header.type = requests->errorType;
     header.code = (nabto_coap_code)requests->errorCode;
     header.messageId = requests->errorMessageId;
     header.token = requests->errorToken;

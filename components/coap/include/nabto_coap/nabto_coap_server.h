@@ -57,16 +57,18 @@ struct nabto_coap_server_requests {
 
     uint16_t messageId;
 
-    // if we need to send an error back. If errorConnection is non
-    // null we need to send an error back else there's no error to
-    // send back.
+    // At most one pending error response. If errorConnection is non
+    // null an error is waiting to be sent; further errors are dropped
+    // until it has been sent (a CON client retransmits its request).
     void*            errorConnection;
+    nabto_coap_type  errorType; // ACK (piggybacked) for CON requests, NON for NON requests
     uint8_t          errorCode;
     nabto_coap_token errorToken;
     uint16_t         errorMessageId;
     const void*      errorPayload;
     size_t           errorPayloadLength;
 
+    // At most one pending empty ACK, same drop rule as above.
     uint16_t ackMessageId;
     void* ackConnection;
 

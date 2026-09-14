@@ -23,10 +23,17 @@ static void nabto_coap_server_handle_data_for_response(struct nabto_coap_server_
 static void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests* requests, struct nabto_coap_server_request* request, struct nabto_coap_incoming_message* message);
 
 /**
- * Make an error response to some condition
+ * Make an error response to some condition. Dropped if an error is
+ * already waiting to be sent.
  * @param errorDescription  keep this pointer alive forever.
  */
 static void nabto_coap_server_make_error_response(struct nabto_coap_server_requests* requests, void* connection, struct nabto_coap_incoming_message* message, nabto_coap_code code, const char* errorDescription);
+
+/**
+ * Queue an empty ACK for a CON message. Dropped if an ACK is already
+ * waiting to be sent.
+ */
+static void nabto_coap_server_queue_ack(struct nabto_coap_server_requests* requests, void* connection, uint16_t messageId);
 
 
 void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests, void* connection, const uint8_t* packet, size_t packetSize)
@@ -37,13 +44,16 @@ void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests
     }
 
 
-    // validate options deny request if we do not know a critical option.
+    // RFC 7252 section 5.4.1: a request with an unrecognized critical
+    // option is answered with 4.02 Bad Option if it is CON, and
+    // rejected (ignored) if it is NON.
     if (msg.type == NABTO_COAP_TYPE_CON ||
-        msg.type == NABTO_COAP_TYPE_NON ||
-        msg.type == NABTO_COAP_TYPE_ACK)
+        msg.type == NABTO_COAP_TYPE_NON)
     {
         if (!nabto_coap_server_validate_critical_options(&msg)) {
-            nabto_coap_server_make_error_response(requests, connection, &msg, NABTO_COAP_CODE_BAD_REQUEST, unsupportedCriticalOption);
+            if (msg.type == NABTO_COAP_TYPE_CON) {
+                nabto_coap_server_make_error_response(requests, connection, &msg, NABTO_COAP_CODE_BAD_OPTION, unsupportedCriticalOption);
+            }
             return;
         }
     }
@@ -64,8 +74,7 @@ void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests
                     // with a piggybacked 2.31 Continue, resend that.
                     request->hasBlock1Ack = true;
                 } else {
-                    requests->ackConnection = connection;
-                    requests->ackMessageId = msg.messageId;
+                    nabto_coap_server_queue_ack(requests, connection, msg.messageId);
                 }
             }
             return;
@@ -154,16 +163,41 @@ bool nabto_coap_server_validate_critical_options(struct nabto_coap_incoming_mess
 
 void nabto_coap_server_make_error_response(struct nabto_coap_server_requests* requests, void* connection, struct nabto_coap_incoming_message* message, nabto_coap_code code, const char* errorDescription)
 {
+    if (requests->errorConnection != NULL) {
+        // An error is already waiting to be sent, keep that one. A CON
+        // client retransmits its request and gets its error then.
+        return;
+    }
     requests->errorConnection = connection;
     requests->errorCode = code;
     requests->errorToken = message->token;
-    requests->errorMessageId = message->messageId;
+    if (message->type == NABTO_COAP_TYPE_CON) {
+        // piggybacked response, RFC 7252 section 5.2.1
+        requests->errorType = NABTO_COAP_TYPE_ACK;
+        requests->errorMessageId = message->messageId;
+    } else {
+        // RFC 7252 section 5.2.3
+        requests->errorType = NABTO_COAP_TYPE_NON;
+        requests->errorMessageId = nabto_coap_server_next_message_id(requests);
+    }
     if (errorDescription != NULL) {
         requests->errorPayload = errorDescription;
         requests->errorPayloadLength = strlen(errorDescription);
+    } else {
+        requests->errorPayload = NULL;
+        requests->errorPayloadLength = 0;
     }
-    return;
+}
 
+void nabto_coap_server_queue_ack(struct nabto_coap_server_requests* requests, void* connection, uint16_t messageId)
+{
+    if (requests->ackConnection != NULL) {
+        // An ACK is already waiting to be sent, keep that one. The
+        // client retransmits and is acked then.
+        return;
+    }
+    requests->ackConnection = connection;
+    requests->ackMessageId = messageId;
 }
 
 void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests* requests, struct nabto_coap_server_request* request, struct nabto_coap_incoming_message* message)
@@ -244,8 +278,7 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests
     }
 
     if (message->type == NABTO_COAP_TYPE_CON && !request->hasBlock1Ack) {
-        requests->ackConnection = request->connection;
-        requests->ackMessageId = message->messageId;
+        nabto_coap_server_queue_ack(requests, request->connection, message->messageId);
     }
 
     if (block1Done) {
