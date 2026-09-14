@@ -319,6 +319,10 @@ uint8_t* nabto_coap_server_send_ack(struct nabto_coap_server_requests* requests,
     header.messageId = requests->ackMessageId;
 
     ptr = nabto_coap_encode_header(&header, ptr, end);
+    if (ptr == NULL) {
+        // Buffer too small, keep the slot so the caller can retry on a larger buffer.
+        return NULL;
+    }
 
     requests->ackConnection = NULL;
 
@@ -336,6 +340,10 @@ uint8_t* nabto_coap_server_send_rst(struct nabto_coap_server_requests* requests,
     header.messageId = requests->rstMessageId;
 
     ptr = nabto_coap_encode_header(&header, ptr, end);
+    if (ptr == NULL) {
+        // Buffer too small, keep the slot so the caller can retry on a larger buffer.
+        return NULL;
+    }
 
     requests->rstConnection = NULL;
 
@@ -356,6 +364,10 @@ uint8_t* nabto_coap_server_send_error(struct nabto_coap_server_requests* request
     ptr = nabto_coap_encode_header(&header, ptr, end);
 
     ptr = nabto_coap_encode_payload(requests->errorPayload, requests->errorPayloadLength, ptr, end);
+    if (ptr == NULL) {
+        // Buffer too small, keep the slot so the caller can retry on a larger buffer.
+        return NULL;
+    }
 
     requests->errorConnection = NULL;
     requests->errorCode = 0;

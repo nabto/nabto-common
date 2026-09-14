@@ -160,6 +160,15 @@ class TestServer {
         return sent;
     }
 
+    // Ask the server to send into a buffer of the given size; returns
+    // what handle_send returned.
+    uint8_t* sendInto(size_t size)
+    {
+        uint8_t buffer[64];
+        BOOST_REQUIRE(size <= sizeof(buffer));
+        return nabto_coap_server_handle_send(&requests, buffer, buffer + size);
+    }
+
     // Respond to the most recent pending request and complete the
     // exchange so the request is released before the server is torn down.
     void respondAndFinish(nabto_coap_code code)
@@ -443,6 +452,44 @@ BOOST_AUTO_TEST_CASE(pending_rst_is_not_overwritten)
     BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_RST);
     BOOST_TEST(sent[0].messageId == 0xa002);
     BOOST_TEST(s.handlerCalls == 0u);
+}
+
+// A pending reply that does not fit the send buffer stays pending so
+// the integrator can retry with a larger buffer.
+BOOST_AUTO_TEST_CASE(pending_reply_is_kept_when_send_buffer_is_too_small)
+{
+    {
+        TestServer s;
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xb001, "t1", "nope").build());
+        BOOST_TEST(s.sendInto(2) == (uint8_t*)NULL);
+        BOOST_TEST(nabto_coap_server_next_event(&s.requests) == NABTO_COAP_SERVER_NEXT_EVENT_SEND);
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].code == NABTO_COAP_CODE_NOT_FOUND);
+        BOOST_TEST(sent[0].messageId == 0xb001);
+    }
+    {
+        TestServer s;
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xb002, "t1").build());
+        BOOST_TEST(s.sendInto(2) == (uint8_t*)NULL);
+        BOOST_TEST(nabto_coap_server_next_event(&s.requests) == NABTO_COAP_SERVER_NEXT_EVENT_SEND);
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+        BOOST_TEST(sent[0].code == NABTO_COAP_CODE_EMPTY);
+        BOOST_TEST(sent[0].messageId == 0xb002);
+        s.respondAndFinish(NABTO_COAP_CODE_CONTENT);
+    }
+    {
+        TestServer s;
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_NON, NABTO_COAP_CODE_GET, 0xb003, "t1").uriQuery("a=b").build());
+        BOOST_TEST(s.sendInto(2) == (uint8_t*)NULL);
+        BOOST_TEST(nabto_coap_server_next_event(&s.requests) == NABTO_COAP_SERVER_NEXT_EVENT_SEND);
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_RST);
+        BOOST_TEST(sent[0].messageId == 0xb003);
+    }
 }
 
 // An error without a description must not carry the payload of an
