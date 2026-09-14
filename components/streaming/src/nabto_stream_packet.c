@@ -138,10 +138,9 @@ void nabto_stream_handle_packet(struct nabto_stream* stream, const uint8_t* pack
 void nabto_stream_parse_syn(struct nabto_stream* stream, const uint8_t* ptr, const uint8_t* end, struct nabto_stream_header* hdr)
 {
     struct nabto_stream_syn_request req;
-    req.contentType = 0;
+    memset(&req, 0, sizeof(req));
     req.maxSendSegmentSize = NABTO_STREAM_DEFAULT_MAX_SEND_SEGMENT_SIZE;
     req.maxRecvSegmentSize = NABTO_STREAM_DEFAULT_MAX_RECV_SEGMENT_SIZE;
-    req.hasNonceCapability = false;
 
     bool hasSeq = false;
 
@@ -153,17 +152,20 @@ void nabto_stream_parse_syn(struct nabto_stream* stream, const uint8_t* ptr, con
         if (ptr == NULL || length > (end - ptr)) {
             break;
         }
+        // reads inside an extension are bounded by the extension, not the packet.
+        const uint8_t* extEnd = ptr + length;
 
         if (type == NABTO_STREAM_EXTENSION_CONTENT_TYPE && length >= 4) {
-            nabto_stream_read_uint32(ptr, end, &req.contentType);
+            nabto_stream_read_uint32(ptr, extEnd, &req.contentType);
         } else if (type == NABTO_STREAM_EXTENSION_SEGMENT_SIZES && length >= 4) {
             const uint8_t* extPtr = ptr;
-            extPtr = nabto_stream_read_uint16(extPtr, end, &req.maxSendSegmentSize);
-            extPtr = nabto_stream_read_uint16(extPtr, end, &req.maxRecvSegmentSize);
+            extPtr = nabto_stream_read_uint16(extPtr, extEnd, &req.maxSendSegmentSize);
+            nabto_stream_read_uint16(extPtr, extEnd, &req.maxRecvSegmentSize);
         } else if (type == NABTO_STREAM_EXTENSION_SYN) {
-            const uint8_t* extPtr = ptr;
-            extPtr = nabto_stream_read_uint32(extPtr, end, &req.seq);
-            hasSeq = true;
+            // a truncated syn extension leaves hasSeq false and the packet is rejected below.
+            if (nabto_stream_read_uint32(ptr, extEnd, &req.seq) != NULL) {
+                hasSeq = true;
+            }
         } else if (type == NABTO_STREAM_EXTENSION_NONCE_CAPABILITY) {
             req.hasNonceCapability = true;
         }
@@ -182,12 +184,13 @@ void nabto_stream_parse_syn(struct nabto_stream* stream, const uint8_t* ptr, con
 void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr, const uint8_t* end, struct nabto_stream_header* hdr)
 {
     struct nabto_stream_syn_ack_request req;
+    memset(&req, 0, sizeof(req));
     req.maxSendSegmentSize = NABTO_STREAM_DEFAULT_MAX_SEND_SEGMENT_SIZE;
     req.maxRecvSegmentSize = NABTO_STREAM_DEFAULT_MAX_RECV_SEGMENT_SIZE;
-    req.hasNonce = false;
 
     bool hasSegmentSizes = false;
     bool hasSeq = false;
+    bool badNonce = false;
 
 
     do {
@@ -198,27 +201,34 @@ void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr,
         if (ptr == NULL || length > (end - ptr)) {
             break;
         }
+        // reads inside an extension are bounded by the extension, not the packet.
+        const uint8_t* extEnd = ptr + length;
 
         if (type == NABTO_STREAM_EXTENSION_SEGMENT_SIZES && length >= 4) {
             const uint8_t* extPtr = ptr;
-            extPtr = nabto_stream_read_uint16(extPtr, end, &req.maxSendSegmentSize);
-            extPtr = nabto_stream_read_uint16(extPtr, end, &req.maxRecvSegmentSize);
+            extPtr = nabto_stream_read_uint16(extPtr, extEnd, &req.maxSendSegmentSize);
+            nabto_stream_read_uint16(extPtr, extEnd, &req.maxRecvSegmentSize);
             hasSegmentSizes = true;
         } else if (type == NABTO_STREAM_EXTENSION_ACK) {
             nabto_stream_parse_ack_extension(stream, ptr, length, hdr);
         } else if (type == NABTO_STREAM_EXTENSION_SYN) {
-            const uint8_t* extPtr = ptr;
-            extPtr = nabto_stream_read_uint32(extPtr, end, &req.seq);
-            hasSeq = true;
+            if (nabto_stream_read_uint32(ptr, extEnd, &req.seq) != NULL) {
+                hasSeq = true;
+            }
         } else if (type == NABTO_STREAM_EXTENSION_NONCE) {
-            const uint8_t* extPtr = ptr;
-            req.hasNonce = true;
-            extPtr = nabto_stream_read_nonce(extPtr, end, req.nonce);
+            // A nonce extension which does not hold a full nonce is a malformed
+            // packet, not a packet without a nonce; treating it as the latter
+            // would turn replay protection off.
+            if (nabto_stream_read_nonce(ptr, extEnd, req.nonce) != NULL) {
+                req.hasNonce = true;
+            } else {
+                badNonce = true;
+            }
         }
         ptr += length;
     } while (ptr < end);
 
-    if (!hasSegmentSizes || !hasSeq) {
+    if (!hasSegmentSizes || !hasSeq || badNonce) {
         NN_LOG_ERROR(stream->module->logger, NABTO_STREAM_LOG_MODULE, "invalid syn|ack packet");
         return;
     }
@@ -280,10 +290,6 @@ void nabto_stream_parse_acking(struct nabto_stream* stream, const uint8_t* ptr, 
 void nabto_stream_parse_ack_extension(struct nabto_stream* stream, const uint8_t* ptr, uint16_t length, struct nabto_stream_header* hdr)
 {
     (void)hdr;
-    if (stream->state == ST_SYN_RCVD) {
-        nabto_stream_handle_ack_on_syn_ack(stream);
-    }
-
     const uint8_t* end = ptr + length;
 
     uint32_t maxAcked;
@@ -291,8 +297,15 @@ void nabto_stream_parse_ack_extension(struct nabto_stream* stream, const uint8_t
     uint32_t tsEcr;
     uint32_t delay;
 
-    if ((length/8 * 8) != length) {
-        NN_LOG_ERROR(stream->module->logger, NABTO_STREAM_LOG_MODULE, "invalid number of ack gaps. %" NN_LOG_PRIu16 " is not 16 + 8*n", length);
+    // 16 bytes of fixed fields followed by whole 8 byte gap blocks. Reject
+    // anything else before it has any effect on the stream.
+    if (length < 16 || ((length - 16) % 8) != 0) {
+        NN_LOG_ERROR(stream->module->logger, NABTO_STREAM_LOG_MODULE, "invalid ack extension length. %" NN_LOG_PRIu16 " is not 16 + 8*n", length);
+        return;
+    }
+
+    if (stream->state == ST_SYN_RCVD) {
+        nabto_stream_handle_ack_on_syn_ack(stream);
     }
 
     ptr = nabto_stream_read_uint32(ptr, end, &maxAcked);
@@ -610,6 +623,11 @@ size_t nabto_stream_create_ack_packet(struct nabto_stream* stream, uint8_t* buff
 
     // add ack data.
     ptr = nabto_stream_add_ack_extension(stream, ptr, end);
+    if (ptr == NULL) {
+        // no room for the ack extension; nothing below must consume segments
+        // for a packet which is not going to be sent.
+        return 0;
+    }
 
     size_t segmentsWritten = 0;
     ptr = nabto_stream_write_data_to_packet(stream, ptr, end, &segmentsWritten, logicalTimestamp);
@@ -695,8 +713,9 @@ struct gapBlock {
 uint8_t* nabto_stream_add_ack_extension(struct nabto_stream* stream, uint8_t* ptr, const uint8_t* end)
 {
     ptr = nabto_stream_write_uint16(ptr, end, NABTO_STREAM_EXTENSION_ACK);
+    // the length is filled in at the end when it is known.
     uint8_t* ackLength = ptr;
-    ptr += 2;
+    ptr = nabto_stream_write_uint16(ptr, end, 0);
     uint8_t* extBegin = ptr;
 
     ptr = nabto_stream_write_uint32(ptr, end, stream->recvMax);
@@ -705,6 +724,10 @@ uint8_t* nabto_stream_add_ack_extension(struct nabto_stream* stream, uint8_t* pt
 
     uint32_t delay = 0;
     ptr = nabto_stream_write_uint32(ptr, end, delay);
+
+    if (ptr == NULL) {
+        return NULL;
+    }
 
     uint16_t gapBlocksCount = 0;
 
@@ -716,7 +739,13 @@ uint8_t* nabto_stream_add_ack_extension(struct nabto_stream* stream, uint8_t* pt
         maxGapBlocks = (size_t)((end - ptr)/8);
     }
 
-    // assert(maxGapBlocks > 2);
+    // The consolidation below folds block 1 into block 0, so at least two
+    // blocks are needed to describe holes in the receive window without
+    // misreporting what has been received. Require the room whether or not
+    // there are holes right now; the buffer is too small for an ack.
+    if (maxGapBlocks < 2) {
+        return NULL;
+    }
 
     if (stream->recvMax != stream->recvTop) {
         // there is holes in the recv window. fill in ack and nack gap data.
@@ -774,6 +803,9 @@ size_t nabto_stream_create_rst_packet(uint8_t* buffer, size_t bufferSize)
     const uint8_t* end = buffer + bufferSize;
     uint8_t* ptr = buffer;
     ptr = nabto_stream_write_header(ptr, end, NABTO_STREAM_FLAG_RST, 0);
+    if (ptr == NULL) {
+        return 0;
+    }
     ptrdiff_t s = ptr - buffer;
     return (size_t)s;
 }
