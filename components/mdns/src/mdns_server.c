@@ -44,7 +44,9 @@ static bool match_label(const uint8_t* bufferLabel, size_t bufferLabelSize, cons
     }
 
     for (size_t i = 0; i < labelSize; i++) {
-        if (tolower(label[i]) != tolower(bufferLabel[i])) {
+        // char may be signed; tolower is only defined for unsigned char
+        // values (and EOF).
+        if (tolower((unsigned char)label[i]) != tolower(bufferLabel[i])) {
             return false;
         }
     }
@@ -167,7 +169,10 @@ bool nabto_mdns_server_handle_packet(struct nabto_mdns_server_context* context,
 
     const char* instanceName = context->instanceName;
 
-    // skip answer, nameservers and additional resources
+    // skip answer, nameservers and additional resources counts
+    if (end - ptr < 6) {
+        return false;
+    }
     ptr += 6;
 
     for (int i = 0; i < questions; i++) {
@@ -243,20 +248,24 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
         ttl = 0;
     }
 
-    uint16_t records = 0;
+    size_t records = 0;
     records += 1; // PTR _nabto._udp.local.
     records += 1; // PTR _services._dns-sd._udp.local.
     records += 1; // TXT p-abcdexyz-d-xyzabcde._nabto._udp.local.
     records += 1; // SRV p-abcdexyz-d-xyzabcde._nabto._udp.local.
-    records += (uint16_t)ipsSize; // A, AAAA p-abcdexyz-d-xyzabcde.local
-    records += (uint16_t)nn_string_set_size(context->subtypes); // additional subtypes
+    records += ipsSize; // A, AAAA p-abcdexyz-d-xyzabcde.local
+    records += nn_string_set_size(context->subtypes); // additional subtypes
+    if (records > UINT16_MAX) {
+        // does not fit in the 16 bit answer count
+        return false;
+    }
 
     // insert header
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, id);
     uint16_t flags = (1 << 15) + (1 << 10); // response flag & Authoritative flag
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, flags);
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 0); // 0 questions
-    ptr = nabto_mdns_server_uint16_write_forward(ptr, end, records);
+    ptr = nabto_mdns_server_uint16_write_forward(ptr, end, (uint16_t)records);
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 0); // 0 authority response records
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, 0); // 0 additional response records
 
@@ -338,6 +347,10 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
         txtDataLen += strlen(value);
     }
 
+    if (txtDataLen > UINT16_MAX) {
+        // does not fit in the 16 bit rdlength
+        return false;
+    }
     ptr = nabto_mdns_server_uint16_write_forward(ptr, end, (uint16_t)txtDataLen);
 
     NN_STRING_MAP_FOREACH(it, context->txtItems) {
@@ -355,7 +368,7 @@ bool nabto_mdns_server_build_packet(struct nabto_mdns_server_context* context,
     }
 
     // insert a(aaa) records
-    for (uint8_t i = 0; i < ipsSize; i++) {
+    for (size_t i = 0; i < ipsSize; i++) {
         ptr = nabto_mdns_server_uint16_write_forward(ptr, end, domainLabel);
 
         if (ips[i].type == NN_IPV4) {

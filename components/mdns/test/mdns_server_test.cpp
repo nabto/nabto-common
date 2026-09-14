@@ -7,6 +7,7 @@
 #include <pthread.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -48,6 +49,11 @@ class TestServer {
     }
 
     size_t subtypeCount() { return nn_string_set_size(&subtypes_); }
+    size_t txtItemCount() { return nn_string_map_size(&txtItems_); }
+    void addTxtItem(const std::string& key, const std::string& value)
+    {
+        nn_string_map_insert(&txtItems_, key.c_str(), value.c_str());
+    }
 
     struct nabto_mdns_server_context ctx;
 
@@ -384,6 +390,19 @@ BOOST_AUTO_TEST_CASE(name_matching_is_case_insensitive)
     BOOST_TEST(handle(s, q, &id));
 }
 
+BOOST_AUTO_TEST_CASE(instance_name_with_non_ascii_bytes_is_matched)
+{
+    // UTF-8 "køkken". Bytes >= 0x80 are negative when char is signed,
+    // which made tolower() compare them differently from the uint8_t
+    // packet bytes and the name never matched.
+    const char* name = "k\xc3\xb8kken";
+    TestServer s(name);
+    QueryBuilder q(16);
+    q.question({ name, "local" }, NABTO_MDNS_A);
+    uint16_t id = 0;
+    BOOST_TEST(handle(s, q, &id));
+}
+
 BOOST_AUTO_TEST_CASE(later_question_in_packet_is_matched)
 {
     TestServer s;
@@ -502,9 +521,13 @@ BOOST_AUTO_TEST_CASE(truncated_packets_are_rejected)
     BOOST_TEST(!nabto_mdns_server_handle_packet(&s.ctx, q.data(), MDNS_HEADER_SIZE, &id));
     // cut inside the name
     BOOST_TEST(!nabto_mdns_server_handle_packet(&s.ctx, q.data(), MDNS_HEADER_SIZE + 4, &id));
-    // shorter than the header
-    BOOST_TEST(!nabto_mdns_server_handle_packet(&s.ctx, q.data(), 3, &id));
-    BOOST_TEST(!nabto_mdns_server_handle_packet(&s.ctx, q.data(), 0, &id));
+    // shorter than the header, including cut inside the an/ns/ar counts
+    // which are skipped rather than read.
+    for (size_t size = 0; size < MDNS_HEADER_SIZE; size++) {
+        BOOST_TEST_CONTEXT("packet size " << size) {
+            BOOST_TEST(!nabto_mdns_server_handle_packet(&s.ctx, q.data(), size, &id));
+        }
+    }
 }
 
 // nabto_mdns_server_build_packet
@@ -670,6 +693,78 @@ BOOST_AUTO_TEST_CASE(build_packet_fails_for_every_size_below_the_packet_size)
     BOOST_TEST(nabto_mdns_server_build_packet(&s.ctx, 1, false, false, ips, 2, 4242, buf.data(), fullSize, &written));
     BOOST_TEST(written == fullSize);
     BOOST_TEST(std::equal(buf.begin(), buf.end(), full));
+}
+
+// The address loop used a uint8_t counter, so more than 255 addresses
+// looped forever. The timeout turns that hang into a failure.
+BOOST_AUTO_TEST_CASE(build_packet_with_more_than_255_ips, *boost::unit_test::timeout(30))
+{
+    TestServer s;
+    std::vector<struct nn_ip_address> ips;
+    for (size_t i = 0; i < 300; i++) {
+        ips.push_back(v4(10, 0, (uint8_t)(i >> 8), (uint8_t)i));
+    }
+    std::vector<uint8_t> buf(16 * 1024);
+    size_t written = 0;
+    BOOST_REQUIRE(nabto_mdns_server_build_packet(&s.ctx, 1, false, false, ips.data(), ips.size(), 4242, buf.data(), buf.size(), &written));
+
+    ResponseParser p(buf.data(), written);
+    std::vector<ResourceRecord> rrs = p.answers();
+    BOOST_TEST(rrs.size() == 4 + s.subtypeCount() + ips.size());
+    size_t aRecords = 0;
+    for (const ResourceRecord& rr : rrs) {
+        if (rr.type == NABTO_MDNS_A) {
+            std::vector<uint8_t> expected(ips[aRecords].ip.v4, ips[aRecords].ip.v4 + 4);
+            BOOST_TEST(p.rdata(rr) == expected);
+            aRecords++;
+        }
+    }
+    BOOST_TEST(aRecords == ips.size());
+}
+
+BOOST_AUTO_TEST_CASE(build_packet_fails_when_answer_count_exceeds_16_bits, *boost::unit_test::timeout(30))
+{
+    TestServer s;
+    // 4 fixed records + subtypes + one per ip must fit in the 16 bit ancount.
+    size_t maxIps = 65535 - 4 - s.subtypeCount();
+    std::vector<struct nn_ip_address> ips(maxIps + 1, v4(10, 0, 0, 1));
+    // each A record is 16 bytes
+    std::vector<uint8_t> buf(ips.size() * 16 + 1024);
+    size_t written = 0;
+
+    BOOST_REQUIRE(nabto_mdns_server_build_packet(&s.ctx, 1, false, false, ips.data(), maxIps, 4242, buf.data(), buf.size(), &written));
+    ResponseParser p(buf.data(), written);
+    BOOST_TEST(p.ancount() == 65535);
+    BOOST_TEST(p.answers().size() == 65535u);
+
+    BOOST_TEST(!nabto_mdns_server_build_packet(&s.ctx, 1, false, false, ips.data(), maxIps + 1, 4242, buf.data(), buf.size(), &written));
+}
+
+BOOST_AUTO_TEST_CASE(build_packet_fails_when_txt_rdata_exceeds_16_bits)
+{
+    // Each txt item is at most 255 bytes + 1 length byte. On top of the
+    // two short default items (43 bytes) 255 items of that size is 65323
+    // bytes and fits the 16 bit rdlength, 256 is 65579 and does not.
+    std::string value(255 - strlen("k000") - strlen("="), 'v');
+    TestServer s;
+    size_t defaultItems = s.txtItemCount();
+    std::vector<uint8_t> buf(128 * 1024);
+    size_t written = 0;
+
+    for (size_t i = 0; i < 255; i++) {
+        char key[8];
+        snprintf(key, sizeof(key), "k%03zu", i);
+        s.addTxtItem(key, value);
+    }
+    BOOST_REQUIRE(nabto_mdns_server_build_packet(&s.ctx, 1, false, false, NULL, 0, 4242, buf.data(), buf.size(), &written));
+    ResponseParser p(buf.data(), written);
+    std::vector<ResourceRecord> rrs = p.answers();
+    const ResourceRecord* txt = p.find(rrs, NABTO_MDNS_TXT, "myinstance._nabto._udp.local");
+    BOOST_REQUIRE(txt != nullptr);
+    BOOST_TEST(p.txtStrings(*txt).size() == defaultItems + 255);
+
+    s.addTxtItem("k255", value);
+    BOOST_TEST(!nabto_mdns_server_build_packet(&s.ctx, 1, false, false, NULL, 0, 4242, buf.data(), buf.size(), &written));
 }
 
 BOOST_AUTO_TEST_CASE(built_response_is_not_handled_as_a_query)
