@@ -310,6 +310,40 @@ BOOST_AUTO_TEST_CASE(retransmit_count_equals_max_retransmits)
     BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_TIMEOUT);
 }
 
+// Stamps are ordered by their signed 32 bit difference, so a deadline
+// 2^31 ms or more ahead reads as already expired. The back-off stops
+// doubling before that, whatever maxRetransmits is set to, and a shift
+// by 32 or more never happens.
+BOOST_AUTO_TEST_CASE(ack_backoff_stops_before_the_stamp_range)
+{
+    TestClient c;
+    c.client.settings.maxRetransmits = 40;
+    const uint32_t ackTimeout = c.client.settings.ackTimeoutMilliseconds;
+
+    SentMessage req = c.sendRequest();
+    uint32_t expected = ackTimeout;
+    for (uint8_t retransmit = 0; retransmit < 40; retransmit++) {
+        // get_next_timeout caps its wake-up hint at ~11.8 hours, so read
+        // the deadline itself.
+        uint32_t timeout = c.request->timeoutStamp;
+        BOOST_TEST(timeout == c.now + expected);
+        BOOST_TEST(expected < (1u << 31));
+        // Nothing is due before the deadline.
+        nabto_coap_client_handle_timeout(&c.client, c.now + expected - 1);
+        BOOST_TEST(c.drain().empty());
+        c.now = timeout;
+        nabto_coap_client_handle_timeout(&c.client, c.now);
+        std::vector<SentMessage> sent = c.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].messageId == req.messageId);
+        if (expected < (1u << 30)) {
+            expected *= 2;
+        }
+    }
+    // 2000 << 20 is the first value at or above 2^30; it is held there.
+    BOOST_TEST(expected == (ackTimeout << 20));
+}
+
 // Audit M7 (sc-4821): nabto_coap_client_request_set_nonconfirmable had
 // no effect, the request was always sent as CON.
 BOOST_AUTO_TEST_CASE(nonconfirmable_request_is_sent_as_non)

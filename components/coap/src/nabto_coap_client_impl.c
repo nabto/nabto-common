@@ -516,9 +516,15 @@ uint8_t* nabto_coap_client_request_create_packet(struct nabto_coap_client_reques
         request->timeoutStamp = now + request->configuredTimeoutMilliseconds;
     } else {
         // RFC 7252 section 4.2: the ack timeout doubles for each
-        // retransmission.
+        // retransmission. Stop doubling before the deadline leaves the
+        // half range the signed stamp comparisons can order, whatever
+        // maxRetransmits the integrator picked.
+        uint32_t timeout = client->settings.ackTimeoutMilliseconds;
+        for (uint8_t i = 0; i < request->retransmissions && timeout < (1u << 30); i++) {
+            timeout *= 2;
+        }
         request->state = NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_ACK;
-        request->timeoutStamp = now + (client->settings.ackTimeoutMilliseconds << request->retransmissions);
+        request->timeoutStamp = now + timeout;
     }
 
     return ptr;
