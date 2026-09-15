@@ -67,7 +67,9 @@ uint16_t nabto_stun_get_send_data(struct nabto_stun* stun, uint8_t* buf, uint16_
     switch(stun->state) {
         case STUN_INITIAL_TEST:
             if (stun->initialTestsSent < stun->numEps) {
-                nabto_stun_message_reset_transaction_id(stun->module, &stun->test1, stun->moduleUserData);
+                // The same request, and so the same transaction id, goes to
+                // every endpoint and is reused on retransmission (rfc 5389
+                // section 6), so a response to any of them can be matched.
                 ret = nabto_stun_write_message(buf, size, &stun->test1);
                 stun->test1.stamp = stun->module->get_stamp(stun->moduleUserData);
                 stun->test1.state = SENT;
@@ -192,7 +194,9 @@ void nabto_stun_handle_packet(struct nabto_stun* stun, const uint8_t* buf, uint1
     NN_LOG_TRACE(stun->module->logger, LOG_MODULE, "nabto_stun_handle_packet, size: %u", size);
     switch(stun->state) {
         case STUN_INITIAL_TEST:
-            if(nabto_stun_decode_message(&stun->test1, buf, size)) {
+            if (!nabto_stun_check_transaction_id(&stun->test1, buf, size)) {
+                NN_LOG_TRACE(stun->module->logger, LOG_MODULE, "Initial test message has an unknown transaction id");
+            } else if(nabto_stun_decode_message(&stun->test1, buf, size)) {
                 if (stun->test1.mappedEp.port == 0) {
                     NN_LOG_TRACE(stun->module->logger, LOG_MODULE, "Initial test message did not contain required attributes");
                     break;

@@ -103,11 +103,6 @@ void nabto_stun_init_message(const struct nabto_stun_module* mod, struct nabto_s
     msg->maxRetransmissions = maxRetransmissions;
 }
 
-void nabto_stun_message_reset_transaction_id(const struct nabto_stun_module* mod, struct nabto_stun_message* msg, void* data)
-{
-    mod->get_rand(msg->transactionId, 12, data);
-}
-
 uint16_t nabto_stun_write_message(uint8_t* buf, uint16_t size, struct nabto_stun_message* msg)
 {
     uint8_t* ptr = buf;
@@ -190,8 +185,13 @@ bool nabto_stun_decode_message(struct nabto_stun_message* msg, const uint8_t* bu
         //printf("not binding response (%d vs %d). size: %d, length+20: %d\n", type, STUN_MESSAGE_BINDING_RESPONSE_SUCCESS, size, length+20);
         return false;
     }
-    // skip magic cookie and transaction ID
-    ptr += 16;
+    uint32_t cookie = 0;
+    ptr = nabto_stun_read_uint32(ptr, end, &cookie);
+    if (ptr == NULL || cookie != STUN_MAGIC_COOKIE) {
+        return false;
+    }
+    // skip the transaction ID, the caller matches it against its requests
+    ptr += 12;
     while (ptr != NULL && ptr < end) {
         uint16_t attType;
         uint16_t attLen;
