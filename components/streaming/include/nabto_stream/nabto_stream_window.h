@@ -35,13 +35,16 @@ enum {
     NABTO_STREAM_DELAYED_ACK_WAIT = 25,
     NABTO_STREAM_DEFAULT_MAX_SEND_SEGMENT_SIZE = 256,
     NABTO_STREAM_DEFAULT_MAX_RECV_SEGMENT_SIZE = 256,
-    NABTO_STREAM_WINDOW_SIZE_INF = 424242,
     NABTO_STREAM_SLOW_START_INITIAL_VALUE = 0x7fffffff,
     NABTO_STREAM_SLOW_START_MIN_VALUE = 2*4, /* 2 packets with up to 4 segments in each packet */
     NABTO_STREAM_SEGMENT_ALLOCATION_RETRY_INTERVAL = 20,
     NABTO_STREAM_CWND_INITIAL_VALUE = 2*4, /* 2 packets with up to 4 segments in each packet */
     NABTO_STREAM_MAX_FLIGHT_SIZE = 10000,
-    NABTO_STREAM_MAX_SEND_LIST_SIZE = 100
+    NABTO_STREAM_MAX_SEND_LIST_SIZE = 100,
+    /* Max recv segments accepted above recvTop, i.e. the advertised recv
+     * window. Matches the sender's max flight so it never limits a well
+     * behaved peer; it bounds what a hostile peer can make us allocate. */
+    NABTO_STREAM_MAX_RECV_SEGMENTS = NABTO_STREAM_MAX_FLIGHT_SIZE
 };
 
 enum nabto_stream_timestamp_type {
