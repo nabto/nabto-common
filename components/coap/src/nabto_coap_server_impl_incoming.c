@@ -10,6 +10,7 @@ static const char* unsupportedCriticalOption = "Unsupported critical option";
 static const char* outOfResources = "Out of resources";
 static const char* wrongPayloadLength = "Wrong payload length";
 static const char* badBlockOption = "Bad block option";
+static const char* requestTooLarge = "Request entity too large";
 
 
 static struct nabto_coap_server_request* nabto_coap_server_handle_new_request(struct nabto_coap_server_requests* requests, struct nabto_coap_incoming_message* message, void* connection);
@@ -231,6 +232,19 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests
         (message->hasBlock2 && NABTO_COAP_BLOCK_SIZE(message->block2) == 7))
     {
         nabto_coap_server_make_error_response(requests, request->connection, message, NABTO_COAP_CODE_BAD_REQUEST, badBlockOption);
+        // User will never see this request, so we free for him
+        request->isFreed = true;
+        request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
+        nabto_coap_server_free_request(request);
+        return;
+    }
+
+    // RFC 7959 section 2.9.3: 4.13 Request Entity Too Large "can be
+    // returned at any time by a server that does not currently have the
+    // resources to store blocks for a block-wise request payload
+    // transfer". The error is the final response for this token.
+    if (request->payloadLength + message->payloadLength > requests->maxRequestPayload) {
+        nabto_coap_server_make_error_response(requests, request->connection, message, NABTO_COAP_CODE_REQUEST_ENTITY_TOO_LARGE, requestTooLarge);
         // User will never see this request, so we free for him
         request->isFreed = true;
         request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
