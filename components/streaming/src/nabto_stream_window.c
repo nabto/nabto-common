@@ -729,6 +729,13 @@ void nabto_stream_handle_syn_ack(struct nabto_stream* stream, struct nabto_strea
 
 struct nabto_stream_recv_segment* nabto_stream_find_recv_buffer(struct nabto_stream* stream, uint32_t seq)
 {
+    // seq comes from the peer. Only allocate for what we told the peer it
+    // may send; the window is closed while a recv segment could not be
+    // allocated.
+    if (nabto_stream_sequence_less(stream->recvMax + nabto_stream_get_recv_window_size(stream), seq)) {
+        return NULL;
+    }
+
     while (nabto_stream_sequence_less(stream->recvMaxAllocated, seq)) {
         if (!nabto_stream_allocate_next_recv_segment(stream)) {
             return NULL;
@@ -845,11 +852,25 @@ void nabto_stream_move_segments_from_recv_window_to_recv_read(struct nabto_strea
 
 uint32_t nabto_stream_get_recv_window_size(struct nabto_stream* stream)
 {
-    // return current recv window size relative to recvTop.
-    if (stream->recvMaxAllocated == stream->recvMax) {
+    // The window is sent together with recvMax as maxAcked, so it is
+    // relative to recvMax: the peer may send up to recvMax + window =
+    // recvTop + NABTO_STREAM_MAX_RECV_SEGMENTS. find_recv_buffer accepts
+    // exactly that.
+    if (stream->recvSegmentAllocationStamp.type == NABTO_STREAM_STAMP_FUTURE) {
+        // a recv segment could not be allocated, the window is closed until
+        // the retry succeeds and a new ack is sent.
+        //
+        // TODO: this is a hack. The timestamp state was never meant to mean
+        // "allocation failed, waiting for the allocator to have available
+        // segments"; it only schedules the retry. Track the allocator state
+        // explicitly instead of deriving it from the retry timestamp.
         return 0;
     }
-    return NABTO_STREAM_WINDOW_SIZE_INF;
+    uint32_t used = stream->recvMax - stream->recvTop;
+    if (used >= NABTO_STREAM_MAX_RECV_SEGMENTS) {
+        return 0;
+    }
+    return NABTO_STREAM_MAX_RECV_SEGMENTS - used;
 }
 
 // return first recv segment with data.
