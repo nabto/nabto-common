@@ -446,7 +446,14 @@ static uint8_t* nabto_coap_server_send_in_response_state(struct nabto_coap_serve
 
     size_t blockSize = (16 << response->block2Size);
     size_t payloadOffset = (response->block2Current * blockSize);
-    size_t payloadRestLength = response->payloadLength - payloadOffset;
+    // The incoming path rejects blocks past the payload; never read
+    // past it here either.
+    size_t payloadRestLength = 0;
+    const uint8_t* payloadRestStart = NULL;
+    if (payloadOffset < response->payloadLength) {
+        payloadRestLength = response->payloadLength - payloadOffset;
+        payloadRestStart = response->payload + payloadOffset;
+    }
 
     if (response->payloadLength > blockSize) {
         uint32_t blockMore = 1;
@@ -470,7 +477,6 @@ static uint8_t* nabto_coap_server_send_in_response_state(struct nabto_coap_serve
     if (payloadRestLength > blockSize) {
         payloadRestLength = blockSize;
     }
-    uint8_t* payloadRestStart = response->payload + payloadOffset;
     ptr = nabto_coap_encode_payload(payloadRestStart, payloadRestLength, ptr, end);
 
     if (request->type == NABTO_COAP_TYPE_NON) {
