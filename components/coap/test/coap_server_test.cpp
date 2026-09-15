@@ -1,5 +1,6 @@
 #include <boost/test/unit_test.hpp>
 #include <nabto_coap/nabto_coap_server.h>
+#include "../src/nabto_coap_server_impl.h" // request internals for assertions
 
 #include <cstdint>
 #include <cstdlib>
@@ -33,7 +34,8 @@ uint32_t block1Option(uint32_t num, bool more, uint32_t szx)
  */
 class RequestBuilder {
  public:
-    RequestBuilder(nabto_coap_type type, nabto_coap_code code, uint16_t messageId, const std::string& token, const std::string& path = "test")
+    // observe >= 0 adds an Observe option with that value.
+    RequestBuilder(nabto_coap_type type, nabto_coap_code code, uint16_t messageId, const std::string& token, const std::string& path = "test", int observe = -1)
     {
         struct nabto_coap_message_header header;
         memset(&header, 0, sizeof(header));
@@ -43,6 +45,11 @@ class RequestBuilder {
         header.token = makeToken(token);
         ptr_ = nabto_coap_encode_header(&header, buffer_, end());
         BOOST_REQUIRE(ptr_ != NULL);
+        if (observe >= 0) {
+            ptr_ = nabto_coap_encode_varint_option(NABTO_COAP_OPTION_OBSERVE - currentOption_, (uint32_t)observe, ptr_, end());
+            BOOST_REQUIRE(ptr_ != NULL);
+            currentOption_ = NABTO_COAP_OPTION_OBSERVE;
+        }
         ptr_ = nabto_coap_encode_option(NABTO_COAP_OPTION_URI_PATH - currentOption_, (const uint8_t*)path.data(), path.size(), ptr_, end());
         BOOST_REQUIRE(ptr_ != NULL);
         currentOption_ = NABTO_COAP_OPTION_URI_PATH;
@@ -120,7 +127,7 @@ class TestServer {
         BOOST_REQUIRE(nabto_coap_server_requests_init(&requests, &server, &TestServer::getStamp, &TestServer::notifyEvent, this) == NABTO_COAP_ERROR_OK);
         const char* path[] = { "test", NULL };
         struct nabto_coap_server_resource* resource;
-        BOOST_REQUIRE(nabto_coap_server_add_resource(&server, NABTO_COAP_CODE_GET, path, &TestServer::handler, this, &resource) == NABTO_COAP_ERROR_OK);
+        BOOST_REQUIRE(nabto_coap_server_add_resource(&server, NABTO_COAP_CODE_GET, path, &TestServer::handler, this, &getResource) == NABTO_COAP_ERROR_OK);
         BOOST_REQUIRE(nabto_coap_server_add_resource(&server, NABTO_COAP_CODE_POST, path, &TestServer::handler, this, &resource) == NABTO_COAP_ERROR_OK);
     }
     ~TestServer()
@@ -198,10 +205,29 @@ class TestServer {
         }
     }
 
+    // Respond to one pending request and hand it back to the server
+    // without sending or acknowledging anything.
+    void respondNoAck(struct nabto_coap_server_request* r, nabto_coap_code code)
+    {
+        BOOST_REQUIRE(r != NULL);
+        nabto_coap_server_response_set_code(r, code);
+        BOOST_REQUIRE(nabto_coap_server_response_ready(r) == NABTO_COAP_ERROR_OK);
+        nabto_coap_server_request_free(r);
+    }
+
+    // Advance the clock past every possible retransmission backoff and
+    // run one timeout tick.
+    void timeoutTick()
+    {
+        now += NABTO_COAP_ACK_TIMEOUT << NABTO_COAP_MAX_RETRANSMITS;
+        nabto_coap_server_handle_timeout(&requests);
+    }
+
     void* connection() { return &connection_; }
 
     struct nabto_coap_server server;
     struct nabto_coap_server_requests requests;
+    struct nabto_coap_server_resource* getResource = NULL;
     struct nabto_coap_server_request* request = NULL; // most recent
     std::vector<struct nabto_coap_server_request*> pendingRequests;
     size_t handlerCalls = 0;
@@ -507,6 +533,104 @@ BOOST_AUTO_TEST_CASE(error_without_description_has_no_stale_payload)
     BOOST_REQUIRE(sent.size() == 1);
     BOOST_TEST(sent[0].code == NABTO_COAP_CODE_NOT_FOUND);
     BOOST_TEST(sent[0].payload.empty());
+}
+
+// Two CON responses whose retransmissions run out on the same tick
+// must both be released; the tick must not stop at the first one.
+BOOST_AUTO_TEST_CASE(timeout_tick_continues_after_a_response_expires)
+{
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x7001, "t1").build());
+    BOOST_TEST(s.drain().size() == 1u); // empty ACK
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x7002, "t2").build());
+    BOOST_TEST(s.drain().size() == 1u); // empty ACK
+    BOOST_REQUIRE(s.pendingRequests.size() == 2u);
+    s.respondNoAck(s.pendingRequests[0], NABTO_COAP_CODE_CONTENT);
+    s.respondNoAck(s.pendingRequests[1], NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 2u);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_CON);
+    BOOST_TEST(sent[1].type == NABTO_COAP_TYPE_CON);
+
+    // The client never ACKs; both responses are retransmitted together.
+    for (int i = 0; i < NABTO_COAP_MAX_RETRANSMITS; i++) {
+        s.timeoutTick();
+        sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 2u);
+        BOOST_TEST(sent[0].token + sent[1].token == "t2t1"); // newest request first
+    }
+    BOOST_TEST(s.requests.activeRequests == 2u);
+
+    // Retransmissions exhausted: both are given up on in one tick.
+    s.timeoutTick();
+    BOOST_TEST(s.drain().empty());
+    BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
+// An observer notification due for retransmission is still handled on
+// a tick where a response is given up on.
+BOOST_AUTO_TEST_CASE(observer_timeout_is_handled_when_a_response_expires)
+{
+    TestServer s;
+
+    // A response that will be given up on after the retransmissions.
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x7101, "t1").build());
+    BOOST_TEST(s.drain().size() == 1u); // empty ACK
+    s.respondNoAck(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    BOOST_TEST(s.drain().size() == 1u);
+    for (int i = 0; i < NABTO_COAP_MAX_RETRANSMITS; i++) {
+        s.timeoutTick();
+        BOOST_TEST(s.drain().size() == 1u);
+    }
+
+    // An observer with a CON notification in flight.
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x7102, "t2", "test", 0).build());
+    BOOST_TEST(s.drain().size() == 1u); // empty ACK
+    BOOST_REQUIRE(s.request != NULL);
+    BOOST_REQUIRE(nabto_coap_server_request_accept_observe(s.request) == NABTO_COAP_ERROR_OK);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    BOOST_TEST(s.requests.activeRequests == 1u);
+    const std::string notification = "hello";
+    BOOST_REQUIRE(nabto_coap_server_resource_notify(&s.requests, s.getResource, NABTO_COAP_CODE_CONTENT, 0, notification.data(), notification.size()) == NABTO_COAP_ERROR_OK);
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1u);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_CON);
+    BOOST_TEST(sent[0].token == "t2");
+    BOOST_TEST(sent[0].payload == notification);
+    uint16_t notificationId = sent[0].messageId;
+
+    // The same tick releases the response and retransmits the notification.
+    s.timeoutTick();
+    BOOST_TEST(s.requests.activeRequests == 0u);
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1u);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_CON);
+    BOOST_TEST(sent[0].token == "t2");
+    BOOST_TEST(sent[0].messageId == notificationId);
+    BOOST_TEST(sent[0].payload == notification);
+    s.handlePacket(ackPacket(notificationId));
+}
+
+// A request still with the application has no response timeout, so a
+// timeout tick must leave it alone.
+BOOST_AUTO_TEST_CASE(timeout_tick_ignores_request_owned_by_user)
+{
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x7201, "t1").build());
+    BOOST_TEST(s.drain().size() == 1u); // empty ACK
+    BOOST_REQUIRE(s.request != NULL);
+
+    s.timeoutTick();
+    BOOST_TEST(nabto_coap_server_next_event(&s.requests) == NABTO_COAP_SERVER_NEXT_EVENT_NOTHING);
+    BOOST_TEST(s.request->response.sendNow == false);
+    BOOST_TEST(s.drain().empty());
+    BOOST_TEST(s.requests.activeRequests == 1u);
+
+    s.respondAndFinish(NABTO_COAP_CODE_CONTENT);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
