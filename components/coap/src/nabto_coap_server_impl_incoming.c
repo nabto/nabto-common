@@ -405,7 +405,9 @@ void nabto_coap_server_handle_ack(struct nabto_coap_server_requests* requests, s
     // handle block2 ack
     response->block2Current += 1;
 
-    if (response->block2Current * blockSize > response->payloadLength) {
+    // The last block ends exactly at payloadLength when the payload is a
+    // multiple of the block size, so >= is the completion test.
+    if (response->block2Current * blockSize >= response->payloadLength) {
         request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
         nabto_coap_server_free_request(request);
         return;

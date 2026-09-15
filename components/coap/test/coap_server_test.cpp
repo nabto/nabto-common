@@ -10,9 +10,30 @@
 
 namespace {
 
-struct nn_allocator defaultAllocator = {
-    &calloc,
-    &free
+// Every allocation the server makes is counted so a test can tell
+// that the server released everything it took.
+size_t liveAllocations = 0;
+
+void* countingCalloc(size_t n, size_t size)
+{
+    void* p = calloc(n, size);
+    if (p != NULL) {
+        liveAllocations++;
+    }
+    return p;
+}
+
+void countingFree(void* p)
+{
+    if (p != NULL) {
+        liveAllocations--;
+    }
+    free(p);
+}
+
+struct nn_allocator countingAllocator = {
+    &countingCalloc,
+    &countingFree
 };
 
 nabto_coap_token makeToken(const std::string& s)
@@ -24,7 +45,7 @@ nabto_coap_token makeToken(const std::string& s)
     return t;
 }
 
-uint32_t block1Option(uint32_t num, bool more, uint32_t szx)
+uint32_t blockOption(uint32_t num, bool more, uint32_t szx)
 {
     return (num << 4) | ((more ? 1u : 0u) << 3) | szx;
 }
@@ -66,9 +87,17 @@ class RequestBuilder {
 
     RequestBuilder& block1(uint32_t num, bool more, uint32_t szx)
     {
-        ptr_ = nabto_coap_encode_varint_option(NABTO_COAP_OPTION_BLOCK1 - currentOption_, block1Option(num, more, szx), ptr_, end());
+        ptr_ = nabto_coap_encode_varint_option(NABTO_COAP_OPTION_BLOCK1 - currentOption_, blockOption(num, more, szx), ptr_, end());
         BOOST_REQUIRE(ptr_ != NULL);
         currentOption_ = NABTO_COAP_OPTION_BLOCK1;
+        return *this;
+    }
+
+    RequestBuilder& block2(uint32_t num, uint32_t szx)
+    {
+        ptr_ = nabto_coap_encode_varint_option(NABTO_COAP_OPTION_BLOCK2 - currentOption_, blockOption(num, false, szx), ptr_, end());
+        BOOST_REQUIRE(ptr_ != NULL);
+        currentOption_ = NABTO_COAP_OPTION_BLOCK2;
         return *this;
     }
 
@@ -112,6 +141,8 @@ struct SentMessage {
     std::string payload;
     bool hasBlock1;
     uint32_t block1;
+    bool hasBlock2;
+    uint32_t block2;
 };
 
 /**
@@ -122,8 +153,9 @@ struct SentMessage {
 class TestServer {
  public:
     TestServer()
+        : allocationsBefore_(liveAllocations)
     {
-        BOOST_REQUIRE(nabto_coap_server_init(&server, NULL, &defaultAllocator) == NABTO_COAP_ERROR_OK);
+        BOOST_REQUIRE(nabto_coap_server_init(&server, NULL, &countingAllocator) == NABTO_COAP_ERROR_OK);
         BOOST_REQUIRE(nabto_coap_server_requests_init(&requests, &server, &TestServer::getStamp, &TestServer::notifyEvent, this) == NABTO_COAP_ERROR_OK);
         const char* path[] = { "test", NULL };
         struct nabto_coap_server_resource* resource;
@@ -134,6 +166,7 @@ class TestServer {
     {
         nabto_coap_server_requests_destroy(&requests);
         nabto_coap_server_destroy(&server);
+        BOOST_TEST(liveAllocations == allocationsBefore_);
     }
 
     void handlePacket(const std::vector<uint8_t>& packet)
@@ -162,6 +195,8 @@ class TestServer {
             }
             m.hasBlock1 = msg.hasBlock1;
             m.block1 = msg.block1;
+            m.hasBlock2 = msg.hasBlock2;
+            m.block2 = msg.block2;
             sent.push_back(m);
         }
         return sent;
@@ -245,6 +280,7 @@ class TestServer {
     }
 
     int connection_;
+    size_t allocationsBefore_;
 };
 
 } // namespace
@@ -295,7 +331,7 @@ BOOST_AUTO_TEST_CASE(retransmitted_block1_chunk_gets_continue_again)
     BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTINUE);
     BOOST_TEST(sent[0].messageId == 0x2000);
     BOOST_TEST(sent[0].hasBlock1);
-    BOOST_TEST(sent[0].block1 == block1Option(0, true, 0));
+    BOOST_TEST(sent[0].block1 == blockOption(0, true, 0));
     BOOST_TEST(s.handlerCalls == 0u);
 
     // The client did not get the Continue and retransmits the chunk.
@@ -306,7 +342,7 @@ BOOST_AUTO_TEST_CASE(retransmitted_block1_chunk_gets_continue_again)
     BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTINUE);
     BOOST_TEST(sent[0].messageId == 0x2000);
     BOOST_TEST(sent[0].hasBlock1);
-    BOOST_TEST(sent[0].block1 == block1Option(0, true, 0));
+    BOOST_TEST(sent[0].block1 == blockOption(0, true, 0));
     BOOST_TEST(s.handlerCalls == 0u);
 
     // The last chunk completes the request; the duplicate must not
@@ -631,6 +667,91 @@ BOOST_AUTO_TEST_CASE(timeout_tick_ignores_request_owned_by_user)
     BOOST_TEST(s.requests.activeRequests == 1u);
 
     s.respondAndFinish(NABTO_COAP_CODE_CONTENT);
+}
+
+// Setting the payload a second time replaces the first one and
+// releases its buffer.
+BOOST_AUTO_TEST_CASE(set_payload_twice_replaces_first_payload)
+{
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xc001, "t1").build());
+    BOOST_TEST(s.drain().size() == 1u);
+    BOOST_REQUIRE(s.request != NULL);
+
+    BOOST_REQUIRE(nabto_coap_server_response_set_payload(s.request, "first", 5) == NABTO_COAP_ERROR_OK);
+    BOOST_REQUIRE(nabto_coap_server_response_set_payload(s.request, "second", 6) == NABTO_COAP_ERROR_OK);
+    nabto_coap_server_response_set_code(s.request, NABTO_COAP_CODE_CONTENT);
+    BOOST_REQUIRE(nabto_coap_server_response_ready(s.request) == NABTO_COAP_ERROR_OK);
+    nabto_coap_server_request_free(s.request);
+    s.request = NULL;
+
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTENT);
+    BOOST_TEST(sent[0].payload == "second");
+    s.handlePacket(ackPacket(sent[0].messageId));
+    BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
+// Freeing a request the handler never answered sends 5.00; a payload
+// the handler had set is released, not leaked.
+BOOST_AUTO_TEST_CASE(free_of_unanswered_request_releases_payload)
+{
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xd001, "t1").build());
+    BOOST_TEST(s.drain().size() == 1u);
+    BOOST_REQUIRE(s.request != NULL);
+
+    BOOST_REQUIRE(nabto_coap_server_response_set_payload(s.request, "unsent", 6) == NABTO_COAP_ERROR_OK);
+    nabto_coap_server_request_free(s.request);
+    s.request = NULL;
+
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_INTERNAL_SERVER_ERROR);
+    BOOST_TEST(sent[0].payload == "Request unhandled");
+    s.handlePacket(ackPacket(sent[0].messageId));
+    BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
+// A payload that is an exact multiple of the block size is complete
+// once the last block is acked; the request must not linger and send
+// an empty block on timeout.
+BOOST_AUTO_TEST_CASE(block2_response_of_exact_block_multiple_completes_on_last_ack)
+{
+    TestServer s;
+    const std::string body(1024, 'x'); // two 512 byte blocks
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xe001, "t1").build());
+    BOOST_TEST(s.drain().size() == 1u);
+    BOOST_REQUIRE(s.request != NULL);
+
+    BOOST_REQUIRE(nabto_coap_server_response_set_payload(s.request, body.data(), body.size()) == NABTO_COAP_ERROR_OK);
+    nabto_coap_server_response_set_code(s.request, NABTO_COAP_CODE_CONTENT);
+    BOOST_REQUIRE(nabto_coap_server_response_ready(s.request) == NABTO_COAP_ERROR_OK);
+    nabto_coap_server_request_free(s.request);
+    s.request = NULL;
+
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTENT);
+    BOOST_TEST(sent[0].hasBlock2);
+    BOOST_TEST(sent[0].block2 == blockOption(0, true, 5));
+    BOOST_TEST(sent[0].payload == body.substr(0, 512));
+    s.handlePacket(ackPacket(sent[0].messageId));
+
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xe002, "t1").block2(1, 5).build());
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTENT);
+    BOOST_TEST(sent[0].hasBlock2);
+    BOOST_TEST(sent[0].block2 == blockOption(1, false, 5));
+    BOOST_TEST(sent[0].payload == body.substr(512));
+    s.handlePacket(ackPacket(sent[0].messageId));
+    BOOST_TEST(s.requests.activeRequests == 0u);
+
+    s.now += NABTO_COAP_ACK_TIMEOUT;
+    nabto_coap_server_handle_timeout(&s.requests);
+    BOOST_TEST(s.drain().empty());
 }
 
 BOOST_AUTO_TEST_SUITE_END()
