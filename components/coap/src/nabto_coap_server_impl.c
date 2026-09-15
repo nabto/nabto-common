@@ -7,6 +7,18 @@
 
 const char* unhandledRequest = "Request unhandled";
 
+// Drop the current response payload, freeing it unless it is static.
+static void nabto_coap_server_response_release_payload(struct nabto_coap_server_request* request)
+{
+    struct nabto_coap_server_response* response = &request->response;
+    if (!response->staticPayload && response->payload) {
+        request->requests->server->allocator.free(response->payload);
+    }
+    response->payload = NULL;
+    response->payloadLength = 0;
+    response->staticPayload = false;
+}
+
 nabto_coap_error nabto_coap_server_init(struct nabto_coap_server* server, struct nn_log* logger, struct nn_allocator* allocator)
 {
     memset(server, 0, sizeof(struct nabto_coap_server));
@@ -105,6 +117,8 @@ void nabto_coap_server_request_free(struct nabto_coap_server_request* request)
     if (request->state == NABTO_COAP_SERVER_REQUEST_STATE_REQUEST ||
         request->state == NABTO_COAP_SERVER_REQUEST_STATE_USER)
     {
+        // The user may have set a payload without ever calling response_ready.
+        nabto_coap_server_response_release_payload(request);
         request->response.staticPayload = true;
         nabto_coap_server_response_set_code(request, NABTO_COAP_CODE_INTERNAL_SERVER_ERROR);
         request->response.payload = (void*)unhandledRequest;
@@ -581,9 +595,7 @@ void nabto_coap_server_free_request(struct nabto_coap_server_request* request)
         server->allocator.free(request->payload);
     }
 
-    if (!request->response.staticPayload && request->response.payload) {
-        server->allocator.free(request->response.payload);
-    }
+    nabto_coap_server_response_release_payload(request);
 
     struct nabto_coap_server_request_parameter* iterator = request->parameterSentinel.next;
     while(iterator != &request->parameterSentinel) {
@@ -786,6 +798,8 @@ void nabto_coap_server_response_set_code_human(struct nabto_coap_server_request*
 nabto_coap_error nabto_coap_server_response_set_payload(struct nabto_coap_server_request* request, const void* data, size_t dataSize)
 {
     struct nabto_coap_server* server = request->requests->server;
+    // Replace any payload set earlier instead of leaking it.
+    nabto_coap_server_response_release_payload(request);
     request->response.payload = server->allocator.calloc(1, dataSize + 1);
     if (request->response.payload == NULL) {
         return NABTO_COAP_ERROR_OUT_OF_MEMORY;
