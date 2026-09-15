@@ -1074,4 +1074,43 @@ BOOST_AUTO_TEST_CASE(remove_connection_clears_observer_of_pending_request)
     BOOST_TEST(s.drain().empty());
 }
 
+// A notification whose ACK is late enough for the timeout to queue a
+// retransmit is still in flight: the delayed ACK cancels the
+// retransmit and a RST still deregisters. An ACK for a notification
+// that is queued but has never been sent matches nothing.
+BOOST_AUTO_TEST_CASE(delayed_ack_or_rst_matches_queued_notification_retransmit)
+{
+    for (int rst = 0; rst <= 1; rst++) {
+        TestServer s;
+        s.registerObserver("t1", 0x1301);
+        s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+        s.request = NULL;
+        BOOST_TEST(s.requests.activeRequests == 0u);
+
+        const std::string notification = "hello";
+        BOOST_REQUIRE(nabto_coap_server_resource_notify(&s.requests, s.getResource, NABTO_COAP_CODE_CONTENT, 0, notification.data(), notification.size()) == NABTO_COAP_ERROR_OK);
+        uint16_t nid = s.requests.observersSentinel->next->messageId;
+        // Not sent yet, so an ACK with its id is not for it.
+        s.handlePacket(ackPacket(nid));
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_CON);
+        BOOST_TEST(sent[0].messageId == nid);
+        BOOST_TEST(sent[0].payload == notification);
+
+        // The timeout queues a retransmit; the client's reply arrives
+        // before it is sent.
+        s.timeoutTick();
+        BOOST_TEST(nabto_coap_server_next_event(&s.requests) == NABTO_COAP_SERVER_NEXT_EVENT_SEND);
+        if (rst) {
+            s.handlePacket(rstPacket(nid));
+            BOOST_TEST(s.observerCount() == 0u);
+        } else {
+            s.handlePacket(ackPacket(nid));
+            BOOST_TEST(s.observerCount() == 1u);
+        }
+        BOOST_TEST(s.drain().empty());
+    }
+}
+
 BOOST_AUTO_TEST_SUITE_END()
