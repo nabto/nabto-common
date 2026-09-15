@@ -160,19 +160,20 @@ void nabto_coap_server_handle_timeout(struct nabto_coap_server_requests* request
     uint32_t now = requests->getStamp(requests->userData);
     struct nabto_coap_server_request* request = requests->requestsSentinel->next;
     while(request != requests->requestsSentinel) {
-        if (nabto_coap_is_stamp_less_equal(request->response.timeout, now))
-        {
-            if (request->response.retransmissions > NABTO_COAP_MAX_RETRANSMITS) {
-                request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
-                nabto_coap_server_free_request(request);
-                return; // free modifies the pointer we need to
-                        // schedule a new timeout of more requests has
-                        // timed out.
-            }
-            request->response.sendNow = true;
-
-        }
+        struct nabto_coap_server_request* current = request;
         request = request->next;
+        // Only responses have a timeout; a request still with the user
+        // has timeout 0 and would otherwise always look expired.
+        if (current->state == NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE &&
+            nabto_coap_is_stamp_less_equal(current->response.timeout, now))
+        {
+            if (current->response.retransmissions > NABTO_COAP_MAX_RETRANSMITS) {
+                current->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
+                nabto_coap_server_free_request(current);
+                continue;
+            }
+            current->response.sendNow = true;
+        }
     }
 
     // Handle observer notification timeouts
