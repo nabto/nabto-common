@@ -1,4 +1,5 @@
 #include <boost/test/unit_test.hpp>
+#include <nabto_stream/nabto_stream.h>
 #include <nabto_stream/nabto_stream_memory.h>
 #include <nabto_stream/nabto_stream_packet.h>
 #include <nabto_stream/nabto_stream_protocol.h>
@@ -313,6 +314,100 @@ uint32_t advertisedWindow(struct nabto_stream* stream)
 void handle(struct nabto_stream* stream, const std::vector<uint8_t>& packet)
 {
     nabto_stream_handle_packet(stream, packet.data(), packet.size());
+}
+
+/**
+ * An established initiator stream whose peer advertised `window` segments
+ * above maxAcked 0 in its syn|ack, with replay protection disabled so the
+ * acks built here need no nonce response. startSequenceNumber is 0, so the
+ * first data segment has seq 1.
+ */
+struct SenderFixture {
+    explicit SenderFixture(uint32_t window)
+    {
+        memset(&module, 0, sizeof(module));
+        module.get_stamp = &getStamp;
+        module.logger = NULL;
+        module.alloc_send_segment = &allocSendSegment;
+        module.free_send_segment = &freeSendSegment;
+        module.alloc_recv_segment = &allocRecvSegment;
+        module.free_recv_segment = &freeRecvSegment;
+        module.notify_event = &notifyEvent;
+        nabto_stream_init(&stream, &module, &stamp);
+        nabto_stream_init_initiator(&stream);
+        nabto_stream_open(&stream, 0);
+        std::vector<uint8_t> synAck = PacketBuilder(NABTO_STREAM_FLAG_SYN | NABTO_STREAM_FLAG_ACK, 42)
+            .ext(NABTO_STREAM_EXTENSION_ACK, ackPayload(0, window, 0))
+            .ext(NABTO_STREAM_EXTENSION_SEGMENT_SIZES, segmentSizes(200, 200))
+            .ext(NABTO_STREAM_EXTENSION_SYN, 0u)
+            .build();
+        handle(&stream, synAck);
+        BOOST_REQUIRE(stream.state == ST_ESTABLISHED);
+        BOOST_REQUIRE(stream.maxAdvertisedWindow == window);
+    }
+
+    ~SenderFixture()
+    {
+        nabto_stream_destroy(&stream);
+    }
+
+    /** Queue `n` segments of 10 bytes each. */
+    void write(size_t n)
+    {
+        for (size_t i = 0; i < n; i++) {
+            const uint8_t data[10] = { 0 };
+            size_t written = 0;
+            BOOST_REQUIRE(nabto_stream_write_buffer(&stream, data, sizeof(data), &written) == NABTO_STREAM_STATUS_OK);
+            BOOST_REQUIRE(written == sizeof(data));
+        }
+    }
+
+    /** Build one data packet, sending whatever flow control allows. */
+    void send()
+    {
+        std::vector<uint8_t> buf(1500, 0xff);
+        BOOST_REQUIRE(nabto_stream_create_packet(&stream, buf.data(), buf.size(), ET_DATA) > 0u);
+    }
+
+    /** Deliver an ack with no gap blocks: everything up to maxAcked is acked. */
+    void ack(uint32_t maxAcked, uint32_t window)
+    {
+        std::vector<uint8_t> packet = PacketBuilder(NABTO_STREAM_FLAG_ACK, 42)
+            .ext(NABTO_STREAM_EXTENSION_ACK, ackPayload(maxAcked, window, 0))
+            .build();
+        handle(&stream, packet);
+    }
+
+    std::vector<uint32_t> unacked() const
+    {
+        std::vector<uint32_t> out;
+        for (const struct nabto_stream_send_segment* s = stream.unacked->nextUnacked; s != stream.unacked; s = s->nextUnacked) {
+            out.push_back(s->seq);
+        }
+        return out;
+    }
+
+    std::vector<uint32_t> sendList() const
+    {
+        std::vector<uint32_t> out;
+        for (const struct nabto_stream_send_segment* s = stream.sendList->nextSend; s != stream.sendList; s = s->nextSend) {
+            out.push_back(s->seq);
+        }
+        return out;
+    }
+
+    struct nabto_stream_module module;
+    struct nabto_stream stream;
+    uint32_t stamp = 0;
+};
+
+std::vector<uint32_t> seqs(uint32_t from, uint32_t to)
+{
+    std::vector<uint32_t> out;
+    for (uint32_t s = from; s <= to; s++) {
+        out.push_back(s);
+    }
+    return out;
 }
 
 } // namespace
@@ -868,6 +963,80 @@ BOOST_AUTO_TEST_CASE(two_segments_in_one_packet_are_both_accepted)
     BOOST_TEST(f.stream.recvTop == 2u);
     BOOST_TEST(f.stream.recvMax == 2u);
     BOOST_TEST(f.counts.recvAllocs == 2u);
+}
+
+// M3: stale acks and flight size on window reduction
+
+BOOST_AUTO_TEST_CASE(reordered_stale_ack_does_not_reduce_the_window)
+{
+    // Segments 1..4 are in flight. The ack for 2 arrives before the ack for
+    // 1; the older one advertises a smaller window edge (the receiver's
+    // allocator was momentarily empty). It must not move 3 and 4 back to
+    // the send list.
+    SenderFixture f(4);
+    f.write(4);
+    f.send();
+    BOOST_REQUIRE(f.unacked() == seqs(1, 4));
+    BOOST_REQUIRE(f.stream.cCtrl.flightSize == 4u);
+
+    f.ack(2, 4);
+    BOOST_TEST(f.stream.maxAcked == 2u);
+    BOOST_TEST(f.stream.maxAdvertisedWindow == 6u);
+    BOOST_TEST(f.unacked() == seqs(3, 4));
+    BOOST_TEST(f.stream.cCtrl.flightSize == 2u);
+
+    f.ack(1, 0);
+    BOOST_TEST(f.stream.maxAcked == 2u);
+    BOOST_TEST(f.stream.maxAdvertisedWindow == 6u);
+    BOOST_TEST(f.unacked() == seqs(3, 4));
+    BOOST_TEST(f.sendList().empty());
+    BOOST_TEST(f.stream.cCtrl.flightSize == 2u);
+
+    f.ack(4, 4);
+    BOOST_TEST(f.unacked().empty());
+    BOOST_TEST(f.stream.cCtrl.flightSize == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(ack_with_equal_max_acked_and_larger_window_is_applied)
+{
+    // The receiver reopens its window without having received more data:
+    // same maxAcked, larger window. That ack is not stale.
+    SenderFixture f(2);
+    f.write(2);
+    f.send();
+    BOOST_REQUIRE(f.unacked() == seqs(1, 2));
+
+    f.ack(2, 0);
+    BOOST_TEST(f.stream.maxAdvertisedWindow == 2u);
+    f.ack(2, 4);
+    BOOST_TEST(f.stream.maxAdvertisedWindow == 6u);
+}
+
+BOOST_AUTO_TEST_CASE(window_reduction_keeps_flight_size_in_step_with_unacked)
+{
+    // A genuine reduction moves 3 and 4 from unacked back to the send list;
+    // they leave the flight and re-enter it when they are sent again, so
+    // the flight size must be 0 once everything is acked.
+    SenderFixture f(4);
+    f.write(4);
+    f.send();
+    BOOST_REQUIRE(f.stream.cCtrl.flightSize == 4u);
+
+    f.ack(2, 0);
+    BOOST_TEST(f.stream.maxAdvertisedWindow == 2u);
+    BOOST_TEST(f.unacked().empty());
+    BOOST_TEST(f.sendList() == seqs(3, 4));
+    BOOST_TEST(f.stream.cCtrl.flightSize == 0u);
+
+    f.ack(2, 4);
+    f.send();
+    BOOST_TEST(f.unacked() == seqs(3, 4));
+    BOOST_TEST(f.sendList().empty());
+    BOOST_TEST(f.stream.cCtrl.flightSize == 2u);
+
+    f.ack(4, 4);
+    BOOST_TEST(f.unacked().empty());
+    BOOST_TEST(f.stream.cCtrl.flightSize == 0u);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
