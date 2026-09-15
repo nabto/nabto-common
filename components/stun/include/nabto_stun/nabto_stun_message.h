@@ -69,8 +69,6 @@ struct nabto_stun_message {
 
 void nabto_stun_init_message(const struct nabto_stun_module* mod, struct nabto_stun_message* msg, bool changeAddr, bool changePort, enum nabto_stun_socket sock, struct nn_endpoint ep, uint8_t maxRetransmissions, void* modUserData);
 
-void nabto_stun_message_reset_transaction_id(const struct nabto_stun_module* mod, struct nabto_stun_message* msg, void* modUserData);
-
 /**
  * Write the binding request for msg to buf. Returns the number of bytes
  * written, or 0 if size is less than STUN_BINDING_REQUEST_SIZE.

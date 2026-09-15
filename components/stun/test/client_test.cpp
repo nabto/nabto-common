@@ -1,6 +1,7 @@
 #include <boost/test/unit_test.hpp>
 #include <nabto_stun/nabto_stun_client.h>
 
+#include <cstring>
 #include <random>
 #include <vector>
 
@@ -62,6 +63,7 @@ class StunTestFixture {
 
         reqSize = nabto_stun_get_send_data(&stun_, reqBuf, 512);
         BOOST_REQUIRE(reqSize == 28);
+        memcpy(lastReqId, reqBuf + 8, 12);
         uint16_t tmp;
         BOOST_TEST((nabto_stun_read_uint16(reqBuf, reqBuf+reqSize, &tmp) != NULL));
         BOOST_TEST(tmp == STUN_MESSAGE_BINDING_REQUEST);
@@ -90,13 +92,20 @@ class StunTestFixture {
     void writeResponse(uint8_t id, struct nn_endpoint mapped,
                        struct nn_endpoint origin, struct nn_endpoint other)
     {
+        uint8_t transactionId[12] = { id };
+        writeResponse(transactionId, mapped, origin, other);
+    }
+
+    void writeResponse(const uint8_t* transactionId, struct nn_endpoint mapped,
+                       struct nn_endpoint origin, struct nn_endpoint other)
+    {
         memset(respBuf, 0, 512);
         uint8_t* ptr = respBuf;
         uint8_t* end = respBuf + sizeof(respBuf);
         ptr = nabto_stun_uint16_write_forward(ptr, end, STUN_MESSAGE_BINDING_RESPONSE_SUCCESS);
         ptr = nabto_stun_uint16_write_forward(ptr, end, 36);
         ptr = nabto_stun_uint32_write_forward(ptr, end, STUN_MAGIC_COOKIE);
-        *ptr = id; ptr+= 12;
+        memcpy(ptr, transactionId, 12); ptr += 12;
         ptr = nabto_stun_uint16_write_forward(ptr, end, STUN_ATTRIBUTE_RESPONSE_ORIGIN);
         ptr = nabto_stun_uint16_write_forward(ptr, end, 8);
         ptr = nabto_stun_uint16_write_forward(ptr, end, STUN_ADDRESS_FAMILY_V4);
@@ -144,9 +153,10 @@ class StunTestFixture {
 
     }
 
-    uint8_t lastTransId = 0; // First rand will give 1, but impl, resets ID on initial packet so IDs starts at 2
+    uint8_t lastTransId = 0; // the first rand gives 1, which the initial test uses for every endpoint and retransmission
     struct nn_endpoint dst;
     uint8_t reqBuf[512];
+    uint8_t lastReqId[12]; // transaction id of the last request written by validateMessage
     uint16_t reqSize;
     uint8_t respBuf[512];
     uint16_t respSize;
@@ -180,15 +190,15 @@ BOOST_AUTO_TEST_CASE(client_simple)
     enum nabto_stun_next_event_type event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_REQUIRE(event == STUN_ET_SEND_PRIMARY);
     validateMessage(eps[0].ip, eps[0].port, false, false);
-    BOOST_TEST(reqBuf[8] == 2); // first trans ID is 2
+    BOOST_TEST(reqBuf[8] == 1); // the initial test has one trans ID
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_SEND_PRIMARY);
     validateMessage(eps[1].ip, eps[1].port, false, false);
-    BOOST_TEST(reqBuf[8] == 3); // second trans ID is 3
+    BOOST_TEST(reqBuf[8] == 1); // the same one for every endpoint
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_WAIT);
 
-    writeResponse(2, ep, eps[0], eps[1]);
+    writeResponse(1, ep, eps[0], eps[1]);
     nabto_stun_handle_packet(&stun_, respBuf, respSize);
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_COMPLETED);
@@ -206,15 +216,15 @@ BOOST_AUTO_TEST_CASE(client_simple_missing_attribute)
     enum nabto_stun_next_event_type event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_REQUIRE(event == STUN_ET_SEND_PRIMARY);
     validateMessage(eps[0].ip, eps[0].port, false, false);
-    BOOST_TEST(reqBuf[8] == 2); // first trans ID is 2
+    BOOST_TEST(reqBuf[8] == 1); // the initial test has one trans ID
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_SEND_PRIMARY);
     validateMessage(eps[1].ip, eps[1].port, false, false);
-    BOOST_TEST(reqBuf[8] == 3); // second trans ID is 3
+    BOOST_TEST(reqBuf[8] == 1); // the same one for every endpoint
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_WAIT);
 
-    writeResponse(2, ep, eps[0], eps[1]);
+    writeResponse(1, ep, eps[0], eps[1]);
     nabto_stun_handle_packet(&stun_, respBuf, respSize-12);
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_WAIT);
@@ -236,11 +246,11 @@ BOOST_AUTO_TEST_CASE(client_retry_initial_packet)
         event = nabto_stun_next_event_to_handle(&stun_);
         BOOST_REQUIRE(event == STUN_ET_SEND_PRIMARY);
         validateMessage(eps[0].ip, eps[0].port, false, false);
-        BOOST_TEST(reqBuf[8] == 2+(n*2)); // first trans ID is 2
+        BOOST_TEST(reqBuf[8] == 1); // retransmissions keep the trans ID
         event = nabto_stun_next_event_to_handle(&stun_);
         BOOST_TEST(event == STUN_ET_SEND_PRIMARY);
         validateMessage(eps[1].ip, eps[1].port, false, false);
-        BOOST_TEST(reqBuf[8] == 3+(n*2)); // second trans ID is 3
+        BOOST_TEST(reqBuf[8] == 1);
         event = nabto_stun_next_event_to_handle(&stun_);
         BOOST_TEST(event == STUN_ET_WAIT);
         nabto_stun_handle_wait_event(&stun_); // handle wait does not verify timeout for initial test so no need to advance `now`
@@ -257,11 +267,11 @@ BOOST_AUTO_TEST_CASE(client_retry_initial_packet_continue)
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_REQUIRE(event == STUN_ET_SEND_PRIMARY);
     validateMessage(eps[0].ip, eps[0].port, false, false);
-    BOOST_TEST(reqBuf[8] == 2); // first trans ID is 2
+    BOOST_TEST(reqBuf[8] == 1); // the initial test has one trans ID
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_SEND_PRIMARY);
     validateMessage(eps[1].ip, eps[1].port, false, false);
-    BOOST_TEST(reqBuf[8] == 3); // second trans ID is 3
+    BOOST_TEST(reqBuf[8] == 1); // the same one for every endpoint
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_WAIT);
     nabto_stun_handle_wait_event(&stun_); // handle wait does not verify timeout for initial test so no need to advance `now`
@@ -269,15 +279,15 @@ BOOST_AUTO_TEST_CASE(client_retry_initial_packet_continue)
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_REQUIRE(event == STUN_ET_SEND_PRIMARY);
     validateMessage(eps[0].ip, eps[0].port, false, false);
-    BOOST_TEST(reqBuf[8] == 4);
+    BOOST_TEST(reqBuf[8] == 1); // retransmissions keep the trans ID
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_SEND_PRIMARY);
     validateMessage(eps[1].ip, eps[1].port, false, false);
-    BOOST_TEST(reqBuf[8] == 5);
+    BOOST_TEST(reqBuf[8] == 1);
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_WAIT);
 
-    writeResponse(2, ep, eps[0], eps[1]);
+    writeResponse(1, ep, eps[0], eps[1]);
     nabto_stun_handle_packet(&stun_, respBuf, respSize);
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_COMPLETED);
@@ -299,67 +309,67 @@ BOOST_AUTO_TEST_CASE(client_full_cone_nat)
     enum nabto_stun_next_event_type event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_REQUIRE(event == STUN_ET_SEND_PRIMARY);
     validateMessage(eps[0].ip, eps[0].port, false, false);
-    BOOST_TEST(reqBuf[8] == 2); // first trans ID is 2
+    BOOST_TEST(reqBuf[8] == 1); // the initial test has one trans ID
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_SEND_PRIMARY);
     validateMessage(eps[1].ip, eps[1].port, false, false);
-    BOOST_TEST(reqBuf[8] == 3); // second trans ID is 3
+    BOOST_TEST(reqBuf[8] == 1); // the same one for every endpoint
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_WAIT);
-    writeResponse(2, ep, eps[0], eps[1]);
+    writeResponse(1, ep, eps[0], eps[1]);
     nabto_stun_handle_packet(&stun_, respBuf, respSize);
 
     // test 2
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_SEND_PRIMARY);
     validateMessage(eps[0].ip, sp2, false, false);
-    BOOST_TEST(reqBuf[8] == 4);
-    writeResponse(4, ep, eps[0], eps[1]);
+    BOOST_TEST(reqBuf[8] == 2);
+    writeResponse(2, ep, eps[0], eps[1]);
     nabto_stun_handle_packet(&stun_, respBuf, respSize);
 
     // test 3
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_SEND_PRIMARY);
     validateMessage(s2Ip, sp1, false, false);
-    BOOST_TEST(reqBuf[8] == 5);
-    writeResponse(5, ep, eps[1], eps[0]);
+    BOOST_TEST(reqBuf[8] == 3);
+    writeResponse(3, ep, eps[1], eps[0]);
     nabto_stun_handle_packet(&stun_, respBuf, respSize);
 
     // test 4
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_SEND_SECONDARY);
     validateMessage(eps[0].ip, sp1, false, true);
-    BOOST_TEST(reqBuf[8] == 6);
-    writeResponse(6, ep, eps[0], eps[1]);
+    BOOST_TEST(reqBuf[8] == 4);
+    writeResponse(4, ep, eps[0], eps[1]);
     nabto_stun_handle_packet(&stun_, respBuf, respSize);
 
     // test 5
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_SEND_SECONDARY);
     validateMessage(eps[0].ip, sp1, true, false);
-    BOOST_TEST(reqBuf[8] == 7);
-    writeResponse(7, ep, eps[1], eps[0]);
+    BOOST_TEST(reqBuf[8] == 5);
+    writeResponse(5, ep, eps[1], eps[0]);
     nabto_stun_handle_packet(&stun_, respBuf, respSize);
 
     // test 6
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_SEND_SECONDARY);
     validateMessage(eps[0].ip, sp1, false, false);
-    BOOST_TEST(reqBuf[8] == 8);
+    BOOST_TEST(reqBuf[8] == 6);
 
     // tests 2-6 is sent in parallel so we do not expect wait untill now
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_WAIT);
 
-    writeResponse(8, ep, eps[0], eps[1]);
+    writeResponse(6, ep, eps[0], eps[1]);
     nabto_stun_handle_packet(&stun_, respBuf, respSize);
 
     // test 7
     event = nabto_stun_next_event_to_handle(&stun_);
     BOOST_TEST(event == STUN_ET_SEND_SECONDARY);
     validateMessage(eps[1].ip, sp1, false, false);
-    BOOST_TEST(reqBuf[8] == 9);
-    writeResponse(9, ep, eps[1], eps[0]);
+    BOOST_TEST(reqBuf[8] == 7);
+    writeResponse(7, ep, eps[1], eps[0]);
     nabto_stun_handle_packet(&stun_, respBuf, respSize);
 
     event = nabto_stun_next_event_to_handle(&stun_);
@@ -373,6 +383,114 @@ BOOST_AUTO_TEST_CASE(client_full_cone_nat)
     BOOST_TEST(r->mapping == STUN_INDEPENDENT);
     BOOST_TEST(r->filtering == STUN_INDEPENDENT);
     BOOST_TEST(r->defectNat == false);
+}
+
+BOOST_AUTO_TEST_CASE(client_initial_test_ignores_wrong_transaction_id)
+{
+    // A binding response that does not carry the transaction id of the
+    // initial request is not ours and must not start the nat analysis with
+    // whatever server addresses it names.
+    struct nn_endpoint ep = {mappedIp, mp1};
+    struct nn_endpoint spoofed = {{NN_IPV4, { {10, 0, 0, 1} }}, 3478};
+    startStunAnalysis(false);
+    BOOST_REQUIRE(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_SEND_PRIMARY);
+    validateMessage(eps[0].ip, eps[0].port, false, false);
+    BOOST_REQUIRE(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_SEND_PRIMARY);
+    validateMessage(eps[1].ip, eps[1].port, false, false);
+    BOOST_REQUIRE(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_WAIT);
+
+    uint8_t wrongId[12];
+    memcpy(wrongId, lastReqId, 12);
+    wrongId[11] ^= 0x01;
+    writeResponse(wrongId, ep, spoofed, spoofed);
+    nabto_stun_handle_packet(&stun_, respBuf, respSize);
+    BOOST_TEST(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_WAIT);
+    BOOST_TEST(nabto_stun_get_result(&stun_) == (struct nabto_stun_result*)NULL);
+    BOOST_TEST(!nabto_stun_get_data_endpoint(&stun_, &dst));
+
+    // the real response is still accepted and test 2 goes to the real server
+    writeResponse(lastReqId, ep, eps[0], eps[1]);
+    nabto_stun_handle_packet(&stun_, respBuf, respSize);
+    BOOST_TEST(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_SEND_PRIMARY);
+    validateMessage(eps[0].ip, sp2, false, false);
+}
+
+BOOST_AUTO_TEST_CASE(client_initial_test_ignores_wrong_magic_cookie)
+{
+    struct nn_endpoint ep = {mappedIp, mp1};
+    startStunAnalysis(true);
+    BOOST_REQUIRE(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_SEND_PRIMARY);
+    validateMessage(eps[0].ip, eps[0].port, false, false);
+    BOOST_REQUIRE(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_SEND_PRIMARY);
+    validateMessage(eps[1].ip, eps[1].port, false, false);
+    BOOST_REQUIRE(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_WAIT);
+
+    writeResponse(lastReqId, ep, eps[0], eps[1]);
+    respBuf[4] ^= 0xff;
+    nabto_stun_handle_packet(&stun_, respBuf, respSize);
+    BOOST_TEST(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_WAIT);
+    BOOST_TEST(nabto_stun_get_result(&stun_) == (struct nabto_stun_result*)NULL);
+
+    respBuf[4] ^= 0xff;
+    nabto_stun_handle_packet(&stun_, respBuf, respSize);
+    BOOST_TEST(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_COMPLETED);
+    struct nabto_stun_result* r = nabto_stun_get_result(&stun_);
+    BOOST_REQUIRE(r != NULL);
+    BOOST_TEST(r->extEp.port == ep.port);
+}
+
+BOOST_AUTO_TEST_CASE(client_initial_test_accepts_response_for_second_endpoint)
+{
+    // The initial request goes to every endpoint; a response from the second
+    // one, carrying the id of the request sent to it, completes the test.
+    struct nn_endpoint ep = {mappedIp, mp1};
+    startStunAnalysis(true);
+    BOOST_REQUIRE(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_SEND_PRIMARY);
+    validateMessage(eps[0].ip, eps[0].port, false, false);
+    uint8_t firstId[12];
+    memcpy(firstId, lastReqId, 12);
+    BOOST_REQUIRE(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_SEND_PRIMARY);
+    validateMessage(eps[1].ip, eps[1].port, false, false);
+    BOOST_TEST(memcmp(firstId, lastReqId, 12) == 0);
+    BOOST_REQUIRE(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_WAIT);
+
+    writeResponse(lastReqId, ep, eps[1], eps[0]);
+    nabto_stun_handle_packet(&stun_, respBuf, respSize);
+    BOOST_TEST(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_COMPLETED);
+    struct nabto_stun_result* r = nabto_stun_get_result(&stun_);
+    BOOST_REQUIRE(r != NULL);
+    BOOST_TEST(r->extEp.port == ep.port);
+    for (int i = 0; i < 4; i++) {
+        BOOST_TEST(r->extEp.ip.ip.v4[i] == ep.ip.ip.v4[i]);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(client_retry_keeps_transaction_id)
+{
+    // rfc 5389 section 6: resends of the same request reuse the same
+    // transaction id, so a late response to the first round is accepted.
+    struct nn_endpoint ep = {mappedIp, mp1};
+    startStunAnalysis(true);
+    BOOST_REQUIRE(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_SEND_PRIMARY);
+    validateMessage(eps[0].ip, eps[0].port, false, false);
+    uint8_t firstId[12];
+    memcpy(firstId, lastReqId, 12);
+    BOOST_REQUIRE(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_SEND_PRIMARY);
+    validateMessage(eps[1].ip, eps[1].port, false, false);
+    BOOST_REQUIRE(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_WAIT);
+    nabto_stun_handle_wait_event(&stun_);
+
+    BOOST_REQUIRE(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_SEND_PRIMARY);
+    validateMessage(eps[0].ip, eps[0].port, false, false);
+    BOOST_TEST(memcmp(firstId, lastReqId, 12) == 0);
+    BOOST_REQUIRE(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_SEND_PRIMARY);
+    validateMessage(eps[1].ip, eps[1].port, false, false);
+    BOOST_TEST(memcmp(firstId, lastReqId, 12) == 0);
+    BOOST_REQUIRE(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_WAIT);
+
+    writeResponse(firstId, ep, eps[0], eps[1]);
+    nabto_stun_handle_packet(&stun_, respBuf, respSize);
+    BOOST_TEST(nabto_stun_next_event_to_handle(&stun_) == STUN_ET_COMPLETED);
 }
 
 BOOST_AUTO_TEST_CASE(client_no_data_endpoint_after_last_initial_send)

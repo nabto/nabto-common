@@ -88,7 +88,8 @@ BOOST_AUTO_TEST_CASE(decode_invalid_att_header)
     uint8_t* ptr = buf;
     ptr = uint16_write_forward(ptr, STUN_MESSAGE_BINDING_RESPONSE_SUCCESS);
     ptr = uint16_write_forward(ptr, 4);
-    ptr += 16;
+    ptr = uint32_write_forward(ptr, STUN_MAGIC_COOKIE);
+    ptr += 12; // transaction id
     ptr = uint16_write_forward(ptr, STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS_ALT);
     ptr = uint16_write_forward(ptr, 20); // no room in packet for 20B attribute
     struct nabto_stun_message msg;
@@ -102,7 +103,8 @@ BOOST_AUTO_TEST_CASE(decode_invalid_att_header_2)
     uint8_t* ptr = buf;
     ptr = uint16_write_forward(ptr, STUN_MESSAGE_BINDING_RESPONSE_SUCCESS);
     ptr = uint16_write_forward(ptr, 14);
-    ptr += 16;
+    ptr = uint32_write_forward(ptr, STUN_MAGIC_COOKIE);
+    ptr += 12; // transaction id
     ptr = uint16_write_forward(ptr, STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS_ALT);
     ptr = uint16_write_forward(ptr, 6); // not long enough for addr
     struct nabto_stun_message msg;
@@ -116,7 +118,8 @@ BOOST_AUTO_TEST_CASE(decode_xor_addr)
     uint8_t* ptr = buf;
     ptr = uint16_write_forward(ptr, STUN_MESSAGE_BINDING_RESPONSE_SUCCESS);
     ptr = uint16_write_forward(ptr, 12);
-    ptr += 16;
+    ptr = uint32_write_forward(ptr, STUN_MAGIC_COOKIE);
+    ptr += 12; // transaction id
     ptr = uint16_write_forward(ptr, STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS_ALT);
     ptr = uint16_write_forward(ptr, 8);
     ptr = uint16_write_forward(ptr, STUN_ADDRESS_FAMILY_V4);
@@ -135,7 +138,8 @@ BOOST_AUTO_TEST_CASE(decode_response_origin)
     uint8_t* ptr = buf;
     ptr = uint16_write_forward(ptr, STUN_MESSAGE_BINDING_RESPONSE_SUCCESS);
     ptr = uint16_write_forward(ptr, 12);
-    ptr += 16;
+    ptr = uint32_write_forward(ptr, STUN_MAGIC_COOKIE);
+    ptr += 12; // transaction id
     ptr = uint16_write_forward(ptr, STUN_ATTRIBUTE_RESPONSE_ORIGIN);
     ptr = uint16_write_forward(ptr, 8);
     ptr = uint16_write_forward(ptr, STUN_ADDRESS_FAMILY_V4);
@@ -154,7 +158,8 @@ BOOST_AUTO_TEST_CASE(decode_other_addr)
     uint8_t* ptr = buf;
     ptr = uint16_write_forward(ptr, STUN_MESSAGE_BINDING_RESPONSE_SUCCESS);
     ptr = uint16_write_forward(ptr, 12);
-    ptr += 16;
+    ptr = uint32_write_forward(ptr, STUN_MAGIC_COOKIE);
+    ptr += 12; // transaction id
     ptr = uint16_write_forward(ptr, STUN_ATTRIBUTE_OTHER_ADDRESS);
     ptr = uint16_write_forward(ptr, 8);
     ptr = uint16_write_forward(ptr, STUN_ADDRESS_FAMILY_V4);
@@ -173,7 +178,8 @@ BOOST_AUTO_TEST_CASE(decode_xor_addr_ipv6)
     uint8_t* ptr = buf;
     ptr = uint16_write_forward(ptr, STUN_MESSAGE_BINDING_RESPONSE_SUCCESS);
     ptr = uint16_write_forward(ptr, 24);
-    ptr += 16;
+    ptr = uint32_write_forward(ptr, STUN_MAGIC_COOKIE);
+    ptr += 12; // transaction id
     ptr = uint16_write_forward(ptr, STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS_ALT);
     ptr = uint16_write_forward(ptr, 20);
     ptr = uint16_write_forward(ptr, STUN_ADDRESS_FAMILY_V6);
@@ -192,7 +198,8 @@ BOOST_AUTO_TEST_CASE(decode_response_origin_ipv6)
     uint8_t* ptr = buf;
     ptr = uint16_write_forward(ptr, STUN_MESSAGE_BINDING_RESPONSE_SUCCESS);
     ptr = uint16_write_forward(ptr, 24);
-    ptr += 16;
+    ptr = uint32_write_forward(ptr, STUN_MAGIC_COOKIE);
+    ptr += 12; // transaction id
     ptr = uint16_write_forward(ptr, STUN_ATTRIBUTE_RESPONSE_ORIGIN);
     ptr = uint16_write_forward(ptr, 20);
     ptr = uint16_write_forward(ptr, STUN_ADDRESS_FAMILY_V6);
@@ -211,7 +218,8 @@ BOOST_AUTO_TEST_CASE(decode_other_addr_ipv6)
     uint8_t* ptr = buf;
     ptr = uint16_write_forward(ptr, STUN_MESSAGE_BINDING_RESPONSE_SUCCESS);
     ptr = uint16_write_forward(ptr, 24);
-    ptr += 16;
+    ptr = uint32_write_forward(ptr, STUN_MAGIC_COOKIE);
+    ptr += 12; // transaction id
     ptr = uint16_write_forward(ptr, STUN_ATTRIBUTE_OTHER_ADDRESS);
     ptr = uint16_write_forward(ptr, 20);
     ptr = uint16_write_forward(ptr, STUN_ADDRESS_FAMILY_V6);
@@ -230,7 +238,8 @@ BOOST_AUTO_TEST_CASE(decode_full_packet)
     uint8_t* ptr = buf;
     ptr = uint16_write_forward(ptr, STUN_MESSAGE_BINDING_RESPONSE_SUCCESS);
     ptr = uint16_write_forward(ptr, 36);
-    ptr += 16;
+    ptr = uint32_write_forward(ptr, STUN_MAGIC_COOKIE);
+    ptr += 12; // transaction id
     // XOR MAPPED ADDR
     ptr = uint16_write_forward(ptr, STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS_ALT);
     ptr = uint16_write_forward(ptr, 8);
@@ -271,7 +280,8 @@ BOOST_AUTO_TEST_CASE(decode_short_address_attribute_at_end_of_packet)
         uint8_t* ptr = buf.data();
         ptr = uint16_write_forward(ptr, STUN_MESSAGE_BINDING_RESPONSE_SUCCESS);
         ptr = uint16_write_forward(ptr, 4 + attLen);
-        ptr += 16;
+        ptr = uint32_write_forward(ptr, STUN_MAGIC_COOKIE);
+        ptr += 12; // transaction id
         ptr = uint16_write_forward(ptr, STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS_ALT);
         ptr = uint16_write_forward(ptr, attLen);
 
@@ -291,13 +301,39 @@ BOOST_AUTO_TEST_CASE(decode_unknown_attribute_ending_inside_padding)
         uint8_t* ptr = buf.data();
         ptr = uint16_write_forward(ptr, STUN_MESSAGE_BINDING_RESPONSE_SUCCESS);
         ptr = uint16_write_forward(ptr, 4 + attLen);
-        ptr += 16;
+        ptr = uint32_write_forward(ptr, STUN_MAGIC_COOKIE);
+        ptr += 12; // transaction id
         ptr = uint16_write_forward(ptr, 0x0022); // SOFTWARE, ignored by the decoder
         ptr = uint16_write_forward(ptr, attLen);
 
         struct nabto_stun_message msg;
         bool res = nabto_stun_decode_message(&msg, buf.data(), (uint16_t)buf.size());
         BOOST_TEST(res, "attLen " << attLen);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(decode_rejects_wrong_magic_cookie)
+{
+    // The same response with and without the rfc 5389 magic cookie. Only the
+    // one carrying the cookie is a stun response.
+    for (int good = 0; good < 2; good++) {
+        std::vector<uint8_t> buf(32, 0);
+        uint8_t* ptr = buf.data();
+        ptr = uint16_write_forward(ptr, STUN_MESSAGE_BINDING_RESPONSE_SUCCESS);
+        ptr = uint16_write_forward(ptr, 12);
+        ptr = uint32_write_forward(ptr, good ? STUN_MAGIC_COOKIE : STUN_MAGIC_COOKIE + 1);
+        ptr += 12; // transaction id
+        ptr = uint16_write_forward(ptr, STUN_ATTRIBUTE_XOR_MAPPED_ADDRESS_ALT);
+        ptr = uint16_write_forward(ptr, 8);
+        ptr = uint16_write_forward(ptr, STUN_ADDRESS_FAMILY_V4);
+        ptr = uint16_write_forward(ptr, 4242);
+        ptr = uint32_write_forward(ptr, 0x7f000001);
+
+        struct nabto_stun_message msg;
+        memset(&msg, 0, sizeof(msg));
+        bool res = nabto_stun_decode_message(&msg, buf.data(), (uint16_t)buf.size());
+        BOOST_TEST(res == (good == 1), "good " << good);
+        BOOST_TEST((msg.mappedEp.port != 0) == (good == 1), "good " << good);
     }
 }
 
