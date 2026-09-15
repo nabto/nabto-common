@@ -1,4 +1,5 @@
 #include <boost/test/unit_test.hpp>
+#include <nabto_stream/nabto_stream.h>
 #include <nabto_stream/nabto_stream_memory.h>
 #include <nabto_stream/nabto_stream_packet.h>
 #include <nabto_stream/nabto_stream_protocol.h>
@@ -296,6 +297,44 @@ std::vector<uint8_t> finPacket(uint32_t seq)
         .build();
 }
 
+/** A syn from a peer that sends segments up to `send` and receives up to `recv`. */
+std::vector<uint8_t> synPacket(uint32_t seq, uint16_t send, uint16_t recv)
+{
+    return PacketBuilder(NABTO_STREAM_FLAG_SYN, 42)
+        .ext(NABTO_STREAM_EXTENSION_SEGMENT_SIZES, segmentSizes(send, recv))
+        .ext(NABTO_STREAM_EXTENSION_SYN, seq)
+        .build();
+}
+
+std::vector<uint8_t> synAckPacket(uint32_t seq, uint16_t send, uint16_t recv)
+{
+    std::vector<uint8_t> nonce(NONCE, NONCE + NABTO_STREAM_NONCE_SIZE);
+    return PacketBuilder(NABTO_STREAM_FLAG_SYN | NABTO_STREAM_FLAG_ACK, 42)
+        .ext(NABTO_STREAM_EXTENSION_SEGMENT_SIZES, segmentSizes(send, recv))
+        .ext(NABTO_STREAM_EXTENSION_SYN, seq)
+        .ext(NABTO_STREAM_EXTENSION_NONCE, nonce)
+        .build();
+}
+
+/** The packet a stream's own syn / syn|ack writer produces. */
+std::vector<uint8_t> createSyn(struct nabto_stream* stream)
+{
+    std::vector<uint8_t> buf(256);
+    size_t n = nabto_stream_create_syn_packet(stream, buf.data(), buf.size());
+    BOOST_REQUIRE(n > 0);
+    buf.resize(n);
+    return buf;
+}
+
+std::vector<uint8_t> createSynAck(struct nabto_stream* stream)
+{
+    std::vector<uint8_t> buf(256);
+    size_t n = nabto_stream_create_syn_ack_packet(stream, buf.data(), buf.size());
+    BOOST_REQUIRE(n > 0);
+    buf.resize(n);
+    return buf;
+}
+
 /**
  * The window size field of the ack extension the stream would send now.
  * Tops up the idle recv segment first, as the integrators do before
@@ -313,6 +352,25 @@ uint32_t advertisedWindow(struct nabto_stream* stream)
 void handle(struct nabto_stream* stream, const std::vector<uint8_t>& packet)
 {
     nabto_stream_handle_packet(stream, packet.data(), packet.size());
+}
+
+/**
+ * Data of exactly the negotiated recv segment size lands in a recv segment
+ * allocated at that size; one byte more is dropped before touching any
+ * segment. seq is the peer's last used sequence number.
+ */
+void checkDataOfNegotiatedRecvSize(struct nabto_stream* stream, uint32_t seq)
+{
+    const uint16_t size = stream->maxRecvSegmentSize;
+    BOOST_REQUIRE(stream->recvWindow->next != stream->recvWindow);
+    BOOST_TEST(stream->recvWindow->next->capacity == size);
+
+    handle(stream, dataPacket(seq + 1, size));
+    BOOST_TEST(stream->recvTop == seq + 1);
+    BOOST_TEST(stream->recvRead->next->size == size);
+
+    handle(stream, dataPacket(seq + 2, size + 1u));
+    BOOST_TEST(stream->recvMax == seq + 1);
 }
 
 } // namespace
@@ -868,6 +926,72 @@ BOOST_AUTO_TEST_CASE(two_segments_in_one_packet_are_both_accepted)
     BOOST_TEST(f.stream.recvTop == 2u);
     BOOST_TEST(f.stream.recvMax == 2u);
     BOOST_TEST(f.counts.recvAllocs == 2u);
+}
+
+// M2: segment size negotiation
+
+BOOST_FIXTURE_TEST_CASE(responder_negotiates_send_and_recv_segment_sizes, StreamFixture)
+{
+    // Our send size is bounded by the peer's recv size and our recv size by
+    // the peer's send size. The sizes are picked so that the old code (both
+    // assignments to maxSendSegmentSize) ends at 300/900 and a same-field
+    // pairing at 200/300.
+    responder();
+    stream.maxSendSegmentSize = 250;
+    stream.maxRecvSegmentSize = 900;
+    handle(&stream, synPacket(0x11223344u, 200, 300));
+
+    BOOST_TEST(stream.state == ST_ACCEPT);
+    BOOST_TEST(stream.maxSendSegmentSize == 250);
+    BOOST_TEST(stream.maxRecvSegmentSize == 200);
+
+    // accept allocates the first segments from the negotiated sizes.
+    nabto_stream_accept(&stream);
+    BOOST_TEST(stream.nextUnfilledSendSegment->capacity == 250);
+    stream.state = ST_ESTABLISHED;
+    stream.nonceValidated = true;
+    checkDataOfNegotiatedRecvSize(&stream, 0x11223344u);
+}
+
+BOOST_FIXTURE_TEST_CASE(initiator_negotiates_send_and_recv_segment_sizes, StreamFixture)
+{
+    initiator();
+    nabto_stream_open(&stream, 0);
+    stream.maxSendSegmentSize = 250;
+    stream.maxRecvSegmentSize = 900;
+    handle(&stream, synAckPacket(0x11223344u, 200, 300));
+
+    BOOST_TEST(stream.state == ST_ESTABLISHED);
+    BOOST_TEST(stream.maxSendSegmentSize == 250);
+    BOOST_TEST(stream.maxRecvSegmentSize == 200);
+    BOOST_TEST(stream.nextUnfilledSendSegment->capacity == 250);
+    checkDataOfNegotiatedRecvSize(&stream, 0x11223344u);
+}
+
+BOOST_AUTO_TEST_CASE(both_ends_agree_on_segment_sizes_after_handshake)
+{
+    // Run the real syn and syn|ack writers between two streams: what one
+    // end sends must be what the other end receives, in both directions.
+    StreamFixture initiator;
+    StreamFixture responder;
+    initiator.initiator();
+    responder.responder();
+    nabto_stream_open(&initiator.stream, 0);
+    initiator.stream.maxSendSegmentSize = 250;
+    initiator.stream.maxRecvSegmentSize = 900;
+    responder.stream.maxSendSegmentSize = 300;
+    responder.stream.maxRecvSegmentSize = 220;
+
+    handle(&responder.stream, createSyn(&initiator.stream));
+    BOOST_REQUIRE(responder.stream.state == ST_ACCEPT);
+    nabto_stream_accept(&responder.stream);
+    handle(&initiator.stream, createSynAck(&responder.stream));
+    BOOST_REQUIRE(initiator.stream.state == ST_ESTABLISHED);
+
+    BOOST_TEST(responder.stream.maxSendSegmentSize == 300);
+    BOOST_TEST(responder.stream.maxRecvSegmentSize == 220);
+    BOOST_TEST(initiator.stream.maxSendSegmentSize == 220);
+    BOOST_TEST(initiator.stream.maxRecvSegmentSize == 300);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
