@@ -9,6 +9,7 @@
 static const char* unsupportedCriticalOption = "Unsupported critical option";
 static const char* outOfResources = "Out of resources";
 static const char* wrongPayloadLength = "Wrong payload length";
+static const char* badBlockOption = "Bad block option";
 
 
 static struct nabto_coap_server_request* nabto_coap_server_handle_new_request(struct nabto_coap_server_requests* requests, struct nabto_coap_incoming_message* message, void* connection);
@@ -223,6 +224,20 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests
     struct nabto_coap_server* server = requests->server;
     bool block1Done = true;
 
+    // RFC 7959 section 2.2: SZX 7 is reserved and MUST lead to 4.00 Bad
+    // Request, also in a Block2 the client sends to suggest a response
+    // block size, which is otherwise ignored.
+    if ((message->hasBlock1 && NABTO_COAP_BLOCK_SIZE(message->block1) == 7) ||
+        (message->hasBlock2 && NABTO_COAP_BLOCK_SIZE(message->block2) == 7))
+    {
+        nabto_coap_server_make_error_response(requests, request->connection, message, NABTO_COAP_CODE_BAD_REQUEST, badBlockOption);
+        // User will never see this request, so we free for him
+        request->isFreed = true;
+        request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
+        nabto_coap_server_free_request(request);
+        return;
+    }
+
     if (message->hasBlock1) {
         uint32_t offset = NABTO_COAP_BLOCK_OFFSET(message->block1);
         if (request->payloadLength != offset) {
@@ -310,6 +325,25 @@ void nabto_coap_server_handle_data_for_response(struct nabto_coap_server_request
 {
     if (message->hasBlock2) {
         struct nabto_coap_server_response* response = &request->response;
+
+        // RFC 7959 section 2.2: SZX 7 is reserved and MUST lead to 4.00
+        // Bad Request. A block past the end of the payload is a bad
+        // request as well; the send path would otherwise read past the
+        // payload buffer. The error is the final response for this token,
+        // so the exchange is over.
+        uint32_t offset = 0;
+        bool badBlock = (NABTO_COAP_BLOCK_SIZE(message->block2) == 7);
+        if (!badBlock) {
+            offset = NABTO_COAP_BLOCK_OFFSET(message->block2);
+            badBlock = (offset != 0 && offset >= response->payloadLength);
+        }
+        if (badBlock) {
+            nabto_coap_server_make_error_response(requests, request->connection, message, NABTO_COAP_CODE_BAD_REQUEST, badBlockOption);
+            request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
+            nabto_coap_server_free_request(request);
+            return;
+        }
+
         response->block2Current = NABTO_COAP_BLOCK_NUM(message->block2);
         response->block2Size = NABTO_COAP_BLOCK_SIZE(message->block2);
         response->messageId = nabto_coap_server_next_message_id(requests);
