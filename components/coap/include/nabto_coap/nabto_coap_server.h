@@ -170,11 +170,13 @@ nabto_coap_error nabto_coap_server_request_accept_observe(struct nabto_coap_serv
 
 /**
  * Get the observer handle for a request that has had observe accepted.
- * Returns NULL if the request was not accepted as an observe registration.
- * The returned pointer can be passed to nabto_coap_server_remove_observer().
- * The handle remains valid until the observer is freed (e.g. via
- * nabto_coap_server_remove_observer, RST from the client, retransmits
- * exhausted, or the connection being removed).
+ * Returns NULL if the request was not accepted as an observe
+ * registration, or if the observer has since been removed (by
+ * nabto_coap_server_remove_observer, a RST from the client, retransmits
+ * exhausted, or the connection being removed). Those events invalidate
+ * a handle obtained earlier, so call this again instead of caching the
+ * handle. The returned pointer can be passed to
+ * nabto_coap_server_remove_observer().
  */
 struct nabto_coap_server_observer* nabto_coap_server_request_get_observer(struct nabto_coap_server_request* request);
 

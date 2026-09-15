@@ -43,6 +43,19 @@ static void nabto_coap_server_queue_ack(struct nabto_coap_server_requests* reque
  */
 static void nabto_coap_server_queue_rst(struct nabto_coap_server_requests* requests, void* connection, uint16_t messageId);
 
+/**
+ * A CON notification with the observer's current message id has been
+ * sent and not yet acknowledged: it is waiting for the ACK, or timed
+ * out and is queued for retransmission. Only such a notification is
+ * matched by an ACK or RST (RFC 7252 section 4.2); before the first
+ * notification the message id is 0, and a queued notification that was
+ * never sent has an id the client cannot have seen.
+ */
+static bool nabto_coap_server_observer_notification_in_flight(struct nabto_coap_server_observer* observer)
+{
+    return observer->waitingForAck || (observer->sendNow && observer->retransmissions > 0);
+}
+
 
 void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests, void* connection, const uint8_t* packet, size_t packetSize)
 {
@@ -115,10 +128,10 @@ void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests
             nabto_coap_server_handle_ack(requests, response->request, &msg);
             return;
         }
-        // Check if ACK is for an observer notification
+        // Check if ACK is for an observer notification in flight
         struct nabto_coap_server_observer* obs = requests->observersSentinel->next;
         while (obs != requests->observersSentinel) {
-            if (obs->connection == connection && obs->messageId == msg.messageId) {
+            if (nabto_coap_server_observer_notification_in_flight(obs) && obs->connection == connection && obs->messageId == msg.messageId) {
                 // Notification was acknowledged, clear in-flight state.
                 struct nabto_coap_server* server = requests->server;
                 if (obs->payload) {
@@ -479,12 +492,12 @@ void nabto_coap_server_handle_rst(struct nabto_coap_server_requests* requests, u
         request = request->next;
     }
 
-    // Check if RST matches an observer notification
+    // Check if RST matches an observer notification in flight
     struct nabto_coap_server_observer* obs = requests->observersSentinel->next;
     while (obs != requests->observersSentinel) {
         struct nabto_coap_server_observer* current = obs;
         obs = obs->next;
-        if (current->connection == connection && current->messageId == messageId) {
+        if (nabto_coap_server_observer_notification_in_flight(current) && current->connection == connection && current->messageId == messageId) {
             nabto_coap_server_observer_free(current);
             return;
         }

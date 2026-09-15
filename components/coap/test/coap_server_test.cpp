@@ -117,17 +117,27 @@ class RequestBuilder {
     uint16_t currentOption_ = 0;
 };
 
-std::vector<uint8_t> ackPacket(uint16_t messageId)
+std::vector<uint8_t> emptyPacket(nabto_coap_type type, uint16_t messageId)
 {
     uint8_t buffer[16];
     struct nabto_coap_message_header header;
     memset(&header, 0, sizeof(header));
-    header.type = NABTO_COAP_TYPE_ACK;
+    header.type = type;
     header.code = NABTO_COAP_CODE_EMPTY;
     header.messageId = messageId;
     uint8_t* ptr = nabto_coap_encode_header(&header, buffer, buffer + sizeof(buffer));
     BOOST_REQUIRE(ptr != NULL);
     return std::vector<uint8_t>(buffer, ptr);
+}
+
+std::vector<uint8_t> ackPacket(uint16_t messageId)
+{
+    return emptyPacket(NABTO_COAP_TYPE_ACK, messageId);
+}
+
+std::vector<uint8_t> rstPacket(uint16_t messageId)
+{
+    return emptyPacket(NABTO_COAP_TYPE_RST, messageId);
 }
 
 /**
@@ -143,6 +153,8 @@ struct SentMessage {
     uint32_t block1;
     bool hasBlock2;
     uint32_t block2;
+    bool hasObserve;
+    uint32_t observe;
 };
 
 /**
@@ -197,6 +209,8 @@ class TestServer {
             m.block1 = msg.block1;
             m.hasBlock2 = msg.hasBlock2;
             m.block2 = msg.block2;
+            m.hasObserve = msg.hasObserve;
+            m.observe = msg.observe;
             sent.push_back(m);
         }
         return sent;
@@ -284,6 +298,27 @@ class TestServer {
         if (ack) {
             handlePacket(ackPacket(sent[0].messageId));
         }
+    }
+
+    // Issue a CON GET with Observe=0 and accept the registration; the
+    // request is left with the test to answer.
+    void registerObserver(const std::string& token, uint16_t messageId)
+    {
+        handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, messageId, token, "test", 0).build());
+        BOOST_TEST(drain().size() == 1u); // empty ACK
+        BOOST_REQUIRE(request != NULL);
+        BOOST_REQUIRE(nabto_coap_server_request_accept_observe(request) == NABTO_COAP_ERROR_OK);
+    }
+
+    size_t observerCount()
+    {
+        size_t count = 0;
+        struct nabto_coap_server_observer* obs = requests.observersSentinel->next;
+        while (obs != requests.observersSentinel) {
+            count++;
+            obs = obs->next;
+        }
+        return count;
     }
 
     void* connection() { return &connection_; }
@@ -1010,6 +1045,158 @@ BOOST_AUTO_TEST_CASE(request_body_over_the_limit_gets_request_entity_too_large)
         BOOST_TEST(sent[0].token == "t4");
         BOOST_TEST(s.handlerCalls == 0u);
         BOOST_TEST(s.requests.activeRequests == 0u);
+    }
+}
+
+// Audit H2 (sc-4812): an observer's message id is 0 until the first
+// notification, and a RST used to be matched against it regardless, so
+// a RST with message id 0 freed a freshly registered observer while the
+// request that registered it was still retransmitting its initial
+// response with a pointer to it. A RST only matches a notification in
+// flight (RFC 7252 section 4.2); the observer survives and the
+// retransmit still carries the Observe option.
+BOOST_AUTO_TEST_CASE(rst_before_any_notification_keeps_observer)
+{
+    TestServer s;
+    s.registerObserver("t1", 0x1001);
+    s.respondNoAck(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_CON);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTENT);
+    BOOST_TEST(sent[0].hasObserve);
+    BOOST_TEST(sent[0].observe == 0u);
+
+    s.handlePacket(rstPacket(0));
+    BOOST_TEST(s.observerCount() == 1u);
+
+    // The client did not ACK the response; the retransmit reads the
+    // observer.
+    s.timeoutTick();
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_CON);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTENT);
+    BOOST_TEST(sent[0].token == "t1");
+    BOOST_TEST(sent[0].hasObserve);
+    BOOST_TEST(sent[0].observe == 0u);
+    s.handlePacket(ackPacket(sent[0].messageId));
+    BOOST_TEST(s.requests.activeRequests == 0u);
+    BOOST_TEST(s.observerCount() == 1u);
+}
+
+// Audit H2 (sc-4812): the observer is removed while the initial
+// response is still in flight, by the client rejecting a notification
+// with a RST (its normal way to deregister) or by the application. The
+// request must drop its pointer to the observer: the handle it can get
+// is NULL and the retransmit goes out without an Observe option.
+BOOST_AUTO_TEST_CASE(observer_removed_while_initial_response_in_flight)
+{
+    for (int byApplication = 0; byApplication <= 1; byApplication++) {
+        TestServer s;
+        s.registerObserver("t1", 0x1101);
+        // The application answers but keeps the request.
+        nabto_coap_server_response_set_code(s.request, NABTO_COAP_CODE_CONTENT);
+        BOOST_REQUIRE(nabto_coap_server_response_ready(s.request) == NABTO_COAP_ERROR_OK);
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].hasObserve);
+        BOOST_TEST(sent[0].observe == 0u);
+
+        const std::string notification = "hello";
+        BOOST_REQUIRE(nabto_coap_server_resource_notify(&s.requests, s.getResource, NABTO_COAP_CODE_CONTENT, 0, notification.data(), notification.size()) == NABTO_COAP_ERROR_OK);
+        sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_CON);
+        BOOST_TEST(sent[0].token == "t1");
+        BOOST_TEST(sent[0].payload == notification);
+        BOOST_TEST(sent[0].hasObserve);
+        BOOST_TEST(sent[0].observe == 1u);
+
+        if (byApplication) {
+            struct nabto_coap_server_observer* observer = nabto_coap_server_request_get_observer(s.request);
+            BOOST_REQUIRE(observer != NULL);
+            nabto_coap_server_remove_observer(observer);
+        } else {
+            s.handlePacket(rstPacket(sent[0].messageId));
+        }
+        BOOST_TEST(s.observerCount() == 0u);
+        BOOST_TEST(nabto_coap_server_request_get_observer(s.request) == (struct nabto_coap_server_observer*)NULL);
+
+        // The client did not ACK the initial response.
+        s.timeoutTick();
+        sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_CON);
+        BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTENT);
+        BOOST_TEST(sent[0].token == "t1");
+        BOOST_TEST(!sent[0].hasObserve);
+
+        nabto_coap_server_request_free(s.request);
+        s.request = NULL;
+        s.handlePacket(ackPacket(sent[0].messageId));
+        BOOST_TEST(s.requests.activeRequests == 0u);
+    }
+}
+
+// Audit H2 (sc-4812): removing the connection frees its observers but
+// leaves a request the application still holds alive; that request
+// must not hand out the freed observer.
+BOOST_AUTO_TEST_CASE(remove_connection_clears_observer_of_pending_request)
+{
+    TestServer s;
+    s.registerObserver("t1", 0x1201);
+    BOOST_TEST(s.observerCount() == 1u);
+
+    nabto_coap_server_remove_connection(&s.requests, s.connection());
+    BOOST_TEST(s.observerCount() == 0u);
+    BOOST_TEST(nabto_coap_server_request_get_observer(s.request) == (struct nabto_coap_server_observer*)NULL);
+
+    nabto_coap_server_response_set_code(s.request, NABTO_COAP_CODE_CONTENT);
+    BOOST_TEST(nabto_coap_server_response_ready(s.request) == NABTO_COAP_ERROR_NO_CONNECTION);
+    nabto_coap_server_request_free(s.request);
+    s.request = NULL;
+    BOOST_TEST(s.requests.activeRequests == 0u);
+    BOOST_TEST(s.drain().empty());
+}
+
+// A notification whose ACK is late enough for the timeout to queue a
+// retransmit is still in flight: the delayed ACK cancels the
+// retransmit and a RST still deregisters. An ACK for a notification
+// that is queued but has never been sent matches nothing.
+BOOST_AUTO_TEST_CASE(delayed_ack_or_rst_matches_queued_notification_retransmit)
+{
+    for (int rst = 0; rst <= 1; rst++) {
+        TestServer s;
+        s.registerObserver("t1", 0x1301);
+        s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+        s.request = NULL;
+        BOOST_TEST(s.requests.activeRequests == 0u);
+
+        const std::string notification = "hello";
+        BOOST_REQUIRE(nabto_coap_server_resource_notify(&s.requests, s.getResource, NABTO_COAP_CODE_CONTENT, 0, notification.data(), notification.size()) == NABTO_COAP_ERROR_OK);
+        uint16_t nid = s.requests.observersSentinel->next->messageId;
+        // Not sent yet, so an ACK with its id is not for it.
+        s.handlePacket(ackPacket(nid));
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_CON);
+        BOOST_TEST(sent[0].messageId == nid);
+        BOOST_TEST(sent[0].payload == notification);
+
+        // The timeout queues a retransmit; the client's reply arrives
+        // before it is sent.
+        s.timeoutTick();
+        BOOST_TEST(nabto_coap_server_next_event(&s.requests) == NABTO_COAP_SERVER_NEXT_EVENT_SEND);
+        if (rst) {
+            s.handlePacket(rstPacket(nid));
+            BOOST_TEST(s.observerCount() == 0u);
+        } else {
+            s.handlePacket(ackPacket(nid));
+            BOOST_TEST(s.observerCount() == 1u);
+        }
+        BOOST_TEST(s.drain().empty());
     }
 }
 
