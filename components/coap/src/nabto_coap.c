@@ -147,9 +147,6 @@ bool nabto_coap_parse_message(const uint8_t* packet, size_t packetSize, struct n
 
 
     while (true) {
-        if (end < ptr) {
-            return false;
-        }
         if (end - ptr == 0 || *ptr == 0xFF) {
             break;
         }
@@ -159,11 +156,20 @@ bool nabto_coap_parse_message(const uint8_t* packet, size_t packetSize, struct n
 
         ptr += 1;
 
+        // The delta value is not needed here, only the number of
+        // extension bytes it occupies. Check that they are present
+        // before stepping over them so ptr never points past end.
         if (delta == 13) {
             // one extra byte;
+            if (end - ptr < 1) {
+                return false;
+            }
             ptr += 1;
         } else if (delta == 14) {
             // two extra bytes
+            if (end - ptr < 2) {
+                return false;
+            }
             ptr += 2;
         } else if (delta == 15) {
             return false;
@@ -171,14 +177,14 @@ bool nabto_coap_parse_message(const uint8_t* packet, size_t packetSize, struct n
 
         if (length == 13) {
             // one extra bytes
-            if (end < ptr || end - ptr < 1) {
+            if (end - ptr < 1) {
                 return false;
             }
             length = ((uint32_t)*ptr) + 13;
             ptr += 1;
         } else if (length == 14) {
             // two extra bytes
-            if (end < ptr || end - ptr < 2) {
+            if (end - ptr < 2) {
                 return false;
             }
             length = (((uint32_t)ptr[0]) << 8) + ((uint32_t)ptr[1]) + 269;
@@ -188,7 +194,7 @@ bool nabto_coap_parse_message(const uint8_t* packet, size_t packetSize, struct n
             return false;
         }
         // skip payload length
-        if (end < ptr || end - ptr < length) {
+        if (end - ptr < length) {
             return false;
         }
         ptr += length;
@@ -283,6 +289,12 @@ uint8_t* nabto_coap_encode_header(struct nabto_coap_message_header* header, uint
 
 uint8_t* nabto_coap_encode_option(uint16_t optionDelta, const uint8_t* optionData, size_t optionDataLength, uint8_t* buffer, uint8_t* bufferEnd)
 {
+    // RFC 7252 section 3.1: the option length field with two extension
+    // bytes covers 269..65804 (0xFFFF + 269); longer options cannot be
+    // encoded. The delta is limited by its uint16_t type.
+    if (optionDataLength > NABTO_COAP_MAX_OPTION_LENGTH) {
+        return NULL;
+    }
     if (buffer == NULL ||
         (bufferEnd - buffer) < (ptrdiff_t)(5 + optionDataLength))
     {

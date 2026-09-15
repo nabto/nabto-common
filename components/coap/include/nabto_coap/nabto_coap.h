@@ -189,7 +189,15 @@ struct nabto_coap_message_header {
 uint8_t* nabto_coap_encode_header(struct nabto_coap_message_header* header, uint8_t* buffer, uint8_t* bufferEnd);
 
 /**
+ * Longest option value which can be encoded, RFC 7252 section 3.1.
+ */
+#define NABTO_COAP_MAX_OPTION_LENGTH (0xFFFFu + 269u)
+
+/**
  * Encode an option with the given delta.
+ *
+ * @return pointer past the encoded option, or NULL if the option is
+ * longer than NABTO_COAP_MAX_OPTION_LENGTH or does not fit in the buffer.
  */
 uint8_t* nabto_coap_encode_option(uint16_t optionDelta, const uint8_t* optionData, size_t optionDataLength, uint8_t* buffer, uint8_t* bufferEnd);
 
