@@ -1,4 +1,4 @@
-name: COAP-CI
+name: STREAMING-CI
 
 on:
   push:
@@ -25,15 +25,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/vcpkg/archives
-          key: vcpkg-${{ runner.os }}-${{ steps.vcpkg.outputs.sha }}-${{ hashFiles('components/coap/ci-build/vcpkg.json') }}
+          key: vcpkg-${{ runner.os }}-${{ steps.vcpkg.outputs.sha }}-${{ hashFiles('components/streaming/ci-build/vcpkg.json') }}
           restore-keys: |
             vcpkg-${{ runner.os }}-${{ steps.vcpkg.outputs.sha }}-
             vcpkg-${{ runner.os }}-
       - name: Bootstrap vcpkg
         run: ./3rdparty/vcpkg/bootstrap-vcpkg.sh -disableMetrics
       - name: Configure cmake
-        run: cmake -B build -S components/coap/ci-build -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/3rdparty/vcpkg/scripts/buildsystems/vcpkg.cmake
+        run: cmake -B build -S components/streaming/ci-build -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/3rdparty/vcpkg/scripts/buildsystems/vcpkg.cmake
       - name: Build
         run: cmake --build build --parallel
       - name: Test
-        run: ./build/coap_test --log_level=test_suite
+        run: ./build/streaming_test --log_level=test_suite

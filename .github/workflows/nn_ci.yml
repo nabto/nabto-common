@@ -3,6 +3,9 @@ name: NN-CI
 on:
   push:
 
+permissions:
+  contents: read
+
 defaults:
   run:
     working-directory: components/nn

@@ -1,3 +1,7 @@
+if (UNIX)
+  add_compile_options(-Wall -Wextra -pedantic)
+endif()
+
 set(src
   src/nabto_stream.c
   src/nabto_stream_window.c
