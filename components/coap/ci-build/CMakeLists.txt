@@ -21,6 +21,7 @@ set(test_dir ${CMAKE_CURRENT_SOURCE_DIR}/../test)
 
 set(CMAKE_CXX_STANDARD 14)
 set(test_src
+${test_dir}/coap_client_test.cpp
 ${test_dir}/coap_parse_test.cpp
 ${test_dir}/coap_server_test.cpp
 ${test_dir}/unit_test.cpp)
