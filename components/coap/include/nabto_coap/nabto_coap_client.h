@@ -164,6 +164,17 @@ bool nabto_coap_client_response_get_payload(struct nabto_coap_client_response* r
 
 nabto_coap_error nabto_coap_client_init(struct nabto_coap_client* client, struct nn_allocator* allocator, nabto_coap_notify_event notifyEvent, void* userData);
 
+/**
+ * Set the message id and token the client uses for the next message
+ * and request; both are incremented after use. RFC 7252 section 4.4
+ * strongly recommends that the initial message id is randomized to
+ * make off-path attacks less likely, and section 5.3.1 that tokens
+ * are nontrivial and randomized, so call this once after
+ * nabto_coap_client_init with values from a random source. Without
+ * it message ids and tokens start at 1.
+ */
+void nabto_coap_client_set_initial_ids(struct nabto_coap_client* client, uint16_t messageId, uint64_t token);
+
 void nabto_coap_client_destroy(struct nabto_coap_client* client);
 
 /**

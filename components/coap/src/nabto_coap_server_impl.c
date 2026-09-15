@@ -34,6 +34,7 @@ nabto_coap_error nabto_coap_server_requests_init(struct nabto_coap_server_reques
     requests->notifyEvent = notifyEvent;
     requests->userData = userData;
     requests->maxRequests = SIZE_MAX;
+    requests->messageId = 1;
 
     // init requests list
     requests->requestsSentinel = server->allocator.calloc(1, sizeof(struct nabto_coap_server_request));
@@ -54,6 +55,11 @@ nabto_coap_error nabto_coap_server_requests_init(struct nabto_coap_server_reques
     requests->observersSentinel->prev = requests->observersSentinel;
 
     return NABTO_COAP_ERROR_OK;
+}
+
+void nabto_coap_server_requests_set_initial_message_id(struct nabto_coap_server_requests* requests, uint16_t messageId)
+{
+    requests->messageId = messageId;
 }
 
 /**
@@ -1080,8 +1086,7 @@ void nabto_coap_server_remove_connection(struct nabto_coap_server_requests* requ
 
 uint16_t nabto_coap_server_next_message_id(struct nabto_coap_server_requests* requests)
 {
-    requests->messageId++;
-    return requests->messageId;
+    return requests->messageId++;
 }
 
 struct nabto_coap_router_node* nabto_coap_router_node_new(struct nabto_coap_server* server)

@@ -21,8 +21,8 @@ nabto_coap_error nabto_coap_client_init(struct nabto_coap_client* client, struct
     client->allocator = *allocator;
     client->settings.ackTimeoutMilliseconds = 2000;
     client->settings.maxRetransmits = 6;
-    client->messageIdCounter = 0;
-    client->tokenCounter = 0;
+    client->messageIdCounter = 1;
+    client->tokenCounter = 1;
     client->notifyEvent = notifyEvent;
     client->userData = userData;
 
@@ -33,6 +33,12 @@ nabto_coap_error nabto_coap_client_init(struct nabto_coap_client* client, struct
     client->requestsSentinel->next = client->requestsSentinel;
     client->requestsSentinel->prev = client->requestsSentinel;
     return NABTO_COAP_ERROR_OK;
+}
+
+void nabto_coap_client_set_initial_ids(struct nabto_coap_client* client, uint16_t messageId, uint64_t token)
+{
+    client->messageIdCounter = messageId;
+    client->tokenCounter = token;
 }
 
 void nabto_coap_client_destroy(struct nabto_coap_client* client)
@@ -366,8 +372,8 @@ struct nabto_coap_client_request* nabto_coap_client_find_request(struct nabto_co
 
 void nabto_coap_client_next_token(struct nabto_coap_client* client, nabto_coap_token* tokenOut)
 {
-    client->tokenCounter++;
     uint64_t token = client->tokenCounter;
+    client->tokenCounter++;
     tokenOut->tokenLength = 8;
     memcpy(tokenOut->token, &token, 8);
 }
@@ -833,6 +839,5 @@ bool nabto_coap_client_response_get_payload(struct nabto_coap_client_response* r
 
 static uint16_t nabto_coap_client_next_message_id(struct nabto_coap_client* client)
 {
-    client->messageIdCounter++;
-    return client->messageIdCounter;
+    return client->messageIdCounter++;
 }

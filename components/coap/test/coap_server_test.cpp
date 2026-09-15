@@ -405,6 +405,25 @@ BOOST_AUTO_TEST_CASE(error_to_non_request_is_non_with_fresh_message_id)
     BOOST_TEST(sent[0].token == "t1");
 }
 
+// RFC 7252 section 4.4: the initial message id should be randomized.
+// The value set by the integrator is used for the first message the
+// server originates and incremented from there.
+BOOST_AUTO_TEST_CASE(initial_message_id_is_used_for_server_originated_messages)
+{
+    TestServer s;
+    nabto_coap_server_requests_set_initial_message_id(&s.requests, 0xc3f7);
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_NON, NABTO_COAP_CODE_GET, 0x7001, "t1", "nope").build());
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_NON);
+    BOOST_TEST(sent[0].messageId == 0xc3f7);
+
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_NON, NABTO_COAP_CODE_GET, 0x7002, "t2", "nope").build());
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].messageId == 0xc3f8);
+}
+
 // RFC 7252 section 5.4.1: an unrecognized critical option in a CON
 // request gets 4.02 Bad Option; in a NON request it is rejected with
 // a matching RST (section 4.3).

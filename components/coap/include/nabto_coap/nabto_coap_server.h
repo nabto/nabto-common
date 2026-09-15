@@ -86,6 +86,16 @@ nabto_coap_error nabto_coap_server_init(struct nabto_coap_server* server, struct
 
 nabto_coap_error nabto_coap_server_requests_init(struct nabto_coap_server_requests* requests, struct nabto_coap_server* server, nabto_coap_get_stamp getStamp, nabto_coap_notify_event notifyEvent, void* userData);
 
+/**
+ * Set the message id the requests context uses for the next message it
+ * originates (NON error responses and observe notifications); it is
+ * incremented after use. RFC 7252 section 4.4 strongly recommends that
+ * the initial message id is randomized to make off-path attacks less
+ * likely, so call this once after nabto_coap_server_requests_init with
+ * a value from a random source. Without it message ids start at 1.
+ */
+void nabto_coap_server_requests_set_initial_message_id(struct nabto_coap_server_requests* requests, uint16_t messageId);
+
 void nabto_coap_server_destroy(struct nabto_coap_server* server);
 
 void nabto_coap_server_requests_destroy(struct nabto_coap_server_requests* requests);
