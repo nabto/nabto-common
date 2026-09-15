@@ -129,6 +129,14 @@ nabto_coap_code nabto_coap_uint16_to_code(uint16_t code);
 
 void nabto_coap_option_iterator_init(struct nabto_coap_option_iterator* iterator, const uint8_t* options, const uint8_t* optionsEnd);
 
+/**
+ * Advance the iterator to the next option.
+ *
+ * @return the iterator, or NULL at the end of the options or at an
+ * option which cannot be decoded. On NULL the iterator is unchanged:
+ * buffer points at the option which could not be decoded, or at
+ * bufferEnd.
+ */
 struct nabto_coap_option_iterator* nabto_coap_get_next_option(struct nabto_coap_option_iterator* iterator);
 
 /**
@@ -165,6 +173,11 @@ struct nabto_coap_incoming_message {
 #define NABTO_COAP_BLOCK_OFFSET(value) (NABTO_COAP_BLOCK_SIZE_ABSOLUTE(value) * NABTO_COAP_BLOCK_NUM(value))
 
 
+/**
+ * Parse a message. Returns false if the header, token, an option
+ * (including option numbers above 65535) or the payload marker is
+ * malformed.
+ */
 bool nabto_coap_parse_message(const uint8_t* packet, size_t packetSize, struct nabto_coap_incoming_message* message);
 
 bool nabto_coap_is_stamp_less(uint32_t s1, uint32_t s2);
@@ -189,7 +202,15 @@ struct nabto_coap_message_header {
 uint8_t* nabto_coap_encode_header(struct nabto_coap_message_header* header, uint8_t* buffer, uint8_t* bufferEnd);
 
 /**
+ * Longest option value which can be encoded, RFC 7252 section 3.1.
+ */
+#define NABTO_COAP_MAX_OPTION_LENGTH (0xFFFFu + 269u)
+
+/**
  * Encode an option with the given delta.
+ *
+ * @return pointer past the encoded option, or NULL if the option is
+ * longer than NABTO_COAP_MAX_OPTION_LENGTH or does not fit in the buffer.
  */
 uint8_t* nabto_coap_encode_option(uint16_t optionDelta, const uint8_t* optionData, size_t optionDataLength, uint8_t* buffer, uint8_t* bufferEnd);
 
