@@ -224,16 +224,21 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests
     struct nabto_coap_server* server = requests->server;
     bool block1Done = true;
 
+    // RFC 7959 section 2.2: SZX 7 is reserved and MUST lead to 4.00 Bad
+    // Request, also in a Block2 the client sends to suggest a response
+    // block size, which is otherwise ignored.
+    if ((message->hasBlock1 && NABTO_COAP_BLOCK_SIZE(message->block1) == 7) ||
+        (message->hasBlock2 && NABTO_COAP_BLOCK_SIZE(message->block2) == 7))
+    {
+        nabto_coap_server_make_error_response(requests, request->connection, message, NABTO_COAP_CODE_BAD_REQUEST, badBlockOption);
+        // User will never see this request, so we free for him
+        request->isFreed = true;
+        request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
+        nabto_coap_server_free_request(request);
+        return;
+    }
+
     if (message->hasBlock1) {
-        // RFC 7959 section 2.2: SZX 7 is reserved and MUST lead to 4.00 Bad Request.
-        if (NABTO_COAP_BLOCK_SIZE(message->block1) == 7) {
-            nabto_coap_server_make_error_response(requests, request->connection, message, NABTO_COAP_CODE_BAD_REQUEST, badBlockOption);
-            // User will never see this request, so we free for him
-            request->isFreed = true;
-            request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
-            nabto_coap_server_free_request(request);
-            return;
-        }
         uint32_t offset = NABTO_COAP_BLOCK_OFFSET(message->block1);
         if (request->payloadLength != offset) {
             nabto_coap_server_make_error_response(requests, request->connection, message, NABTO_COAP_CODE_REQUEST_ENTITY_INCOMPLETE, NULL);

@@ -845,8 +845,9 @@ BOOST_AUTO_TEST_CASE(block2_request_for_response_without_payload_gets_bad_reques
 }
 
 // RFC 7959 section 2.2: SZX 7 is reserved, MUST NOT be sent and MUST
-// lead to 4.00 Bad Request upon reception in a request. Both the Block2
-// and the Block1 path must reject it.
+// lead to 4.00 Bad Request upon reception in a request. This covers a
+// Block2 request for the next block, a Block1 chunk, and a Block2 in a
+// new request suggesting a response block size.
 BOOST_AUTO_TEST_CASE(reserved_block_size_gets_bad_request)
 {
     {
@@ -873,6 +874,18 @@ BOOST_AUTO_TEST_CASE(reserved_block_size_gets_bad_request)
         BOOST_TEST(sent[0].code == NABTO_COAP_CODE_BAD_REQUEST);
         BOOST_TEST(sent[0].messageId == 0xf203);
         BOOST_TEST(sent[0].token == "t2");
+        BOOST_TEST(s.handlerCalls == 0u);
+        BOOST_TEST(s.requests.activeRequests == 0u);
+    }
+    {
+        TestServer s;
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xf204, "t3").block2(0, 7).build());
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+        BOOST_TEST(sent[0].code == NABTO_COAP_CODE_BAD_REQUEST);
+        BOOST_TEST(sent[0].messageId == 0xf204);
+        BOOST_TEST(sent[0].token == "t3");
         BOOST_TEST(s.handlerCalls == 0u);
         BOOST_TEST(s.requests.activeRequests == 0u);
     }
