@@ -366,7 +366,11 @@ void nabto_stream_parse_ack_extension(struct nabto_stream* stream, const uint8_t
         return;
     }
 
+    // An ack is stale when it carries a lower maxAcked than one already seen.
+    // A reordered stale ack must not shrink the advertised window; an ack
+    // with the same maxAcked is applied since the window may have opened.
     if (nabto_stream_sequence_less_equal(stream->maxAcked, maxAcked)) {
+        stream->maxAcked = maxAcked;
 
         uint32_t oldAdvertisedWindow = stream->maxAdvertisedWindow;
         stream->maxAdvertisedWindow = maxAcked + windowSize;
