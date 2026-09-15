@@ -78,6 +78,7 @@ struct nabto_coap_server_requests {
 
     size_t maxRequests; // max concurrent requests
     size_t activeRequests;
+    size_t maxRequestPayload; // max reassembled request body
 
     struct nabto_coap_server_observer* observersSentinel;
 };
@@ -92,6 +93,14 @@ void nabto_coap_server_requests_destroy(struct nabto_coap_server_requests* reque
 
 
 void nabto_coap_server_limit_requests(struct nabto_coap_server_requests* requests, size_t limit);
+
+/**
+ * Limit the size of a request body. A request whose body, reassembled
+ * from Block1 chunks or sent in one packet, would exceed the limit is
+ * answered with 4.13 Request Entity Too Large before it reaches the
+ * resource handler. Unlimited by default.
+ */
+void nabto_coap_server_limit_request_size(struct nabto_coap_server_requests* requests, size_t limit);
 
 #define NABTO_COAP_SERVER_LOG_TRACE(fmt, args) do { printf(fmt, args); } while(0);
 

@@ -961,6 +961,93 @@ BOOST_AUTO_TEST_CASE(block2_request_with_smaller_block_size_is_served)
     BOOST_TEST(s.requests.activeRequests == 0u);
 }
 
+// Audit H3 (sc-4813): the body of a Block1 request was reassembled
+// without any bound, so a client could grow it a chunk at a time until
+// the device ran out of memory, before the handler ever saw the request.
+// RFC 7959 section 2.9.3: 4.13 Request Entity Too Large "can be returned
+// at any time by a server that does not currently have the resources to
+// store blocks for a block-wise request payload transfer".
+BOOST_AUTO_TEST_CASE(request_body_over_the_limit_gets_request_entity_too_large)
+{
+    const std::string chunk(16, 'a');
+    {
+        // Two chunks fit in 40 bytes, the third does not.
+        TestServer s;
+        nabto_coap_server_limit_request_size(&s.requests, 40);
+        for (uint32_t num = 0; num < 2; num++) {
+            s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, (uint16_t)(0xf400 + num), "t1").block1(num, true, 0).payload(chunk).build());
+            std::vector<SentMessage> sent = s.drain();
+            BOOST_REQUIRE(sent.size() == 1);
+            BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTINUE);
+            BOOST_TEST(sent[0].hasBlock1);
+            BOOST_TEST(sent[0].block1 == blockOption(num, true, 0));
+        }
+        BOOST_TEST(s.requests.activeRequests == 1u);
+
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xf402, "t1").block1(2, true, 0).payload(chunk).build());
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+        BOOST_TEST(sent[0].code == NABTO_COAP_CODE_REQUEST_ENTITY_TOO_LARGE);
+        BOOST_TEST(sent[0].messageId == 0xf402);
+        BOOST_TEST(sent[0].token == "t1");
+        BOOST_TEST(sent[0].payload == "Request entity too large");
+        BOOST_TEST(s.handlerCalls == 0u);
+        BOOST_TEST(s.requests.activeRequests == 0u);
+    }
+    {
+        // A body of exactly the limit is accepted.
+        TestServer s;
+        nabto_coap_server_limit_request_size(&s.requests, 32);
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xf403, "t2").block1(0, true, 0).payload(chunk).build());
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTINUE);
+
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xf404, "t2").block1(1, false, 0).payload(chunk).build());
+        sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+        BOOST_TEST(sent[0].code == NABTO_COAP_CODE_EMPTY);
+        BOOST_REQUIRE(s.handlerCalls == 1u);
+        void* payload;
+        size_t payloadLength;
+        BOOST_TEST(nabto_coap_server_request_get_payload(s.request, &payload, &payloadLength));
+        BOOST_TEST(payloadLength == 32u);
+
+        s.respondAndFinish(NABTO_COAP_CODE_CHANGED);
+    }
+    {
+        // The limit also applies to a body sent in a single packet.
+        TestServer s;
+        nabto_coap_server_limit_request_size(&s.requests, 8);
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xf405, "t3").payload(chunk).build());
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+        BOOST_TEST(sent[0].code == NABTO_COAP_CODE_REQUEST_ENTITY_TOO_LARGE);
+        BOOST_TEST(sent[0].messageId == 0xf405);
+        BOOST_TEST(sent[0].token == "t3");
+        BOOST_TEST(s.handlerCalls == 0u);
+        BOOST_TEST(s.requests.activeRequests == 0u);
+    }
+    {
+        // A NON chunk over the limit gets the error as a NON with its
+        // own message id.
+        TestServer s;
+        nabto_coap_server_limit_request_size(&s.requests, 8);
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_NON, NABTO_COAP_CODE_POST, 0xf406, "t4").block1(0, true, 0).payload(chunk).build());
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_NON);
+        BOOST_TEST(sent[0].code == NABTO_COAP_CODE_REQUEST_ENTITY_TOO_LARGE);
+        BOOST_TEST(sent[0].messageId != 0xf406);
+        BOOST_TEST(sent[0].token == "t4");
+        BOOST_TEST(s.handlerCalls == 0u);
+        BOOST_TEST(s.requests.activeRequests == 0u);
+    }
+}
+
 // Audit H2 (sc-4812): an observer's message id is 0 until the first
 // notification, and a RST used to be matched against it regardless, so
 // a RST with message id 0 freed a freshly registered observer while the

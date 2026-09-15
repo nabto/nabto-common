@@ -1,4 +1,5 @@
 #include <boost/test/unit_test.hpp>
+#include <nabto_stream/nabto_stream_memory.h>
 #include <nabto_stream/nabto_stream_packet.h>
 #include <nabto_stream/nabto_stream_protocol.h>
 #include <nabto_stream/nabto_stream_window.h>
@@ -93,6 +94,78 @@ struct StreamFixture {
     struct nabto_stream_module module;
     struct nabto_stream stream;
     uint32_t stamp = 0;
+};
+
+/**
+ * Module user data for a fake module whose recv segment allocator counts
+ * calls and fails after recvCap allocations, so a runaway allocation loop
+ * fails an assertion instead of exhausting memory.
+ */
+struct CountingUserData {
+    uint32_t stamp = 0;
+    size_t recvAllocCalls = 0; // every call, failed ones included
+    size_t recvAllocs = 0;     // successful calls
+    size_t recvFrees = 0;
+    size_t recvCap = 0;
+};
+
+uint32_t countingGetStamp(void* userData)
+{
+    CountingUserData* d = (CountingUserData*)userData;
+    return d->stamp++;
+}
+
+struct nabto_stream_recv_segment* countingAllocRecvSegment(size_t bufferSize, void* userData)
+{
+    CountingUserData* d = (CountingUserData*)userData;
+    d->recvAllocCalls++;
+    if (d->recvAllocs >= d->recvCap) {
+        return NULL;
+    }
+    d->recvAllocs++;
+    return allocRecvSegment(bufferSize, NULL);
+}
+
+void countingFreeRecvSegment(struct nabto_stream_recv_segment* segment, void* userData)
+{
+    CountingUserData* d = (CountingUserData*)userData;
+    d->recvFrees++;
+    freeRecvSegment(segment, NULL);
+}
+
+/**
+ * An established responder stream with recvTop = recvMax = recvMaxAllocated
+ * = 0 and a counting allocator that fails after recvCap allocations. The
+ * default cap leaves room for the whole recv window plus a few segments.
+ */
+struct CountingFixture {
+    explicit CountingFixture(size_t recvCap = NABTO_STREAM_MAX_RECV_SEGMENTS + 16)
+    {
+        counts.recvCap = recvCap;
+        memset(&module, 0, sizeof(module));
+        module.get_stamp = &countingGetStamp;
+        module.logger = NULL;
+        module.alloc_send_segment = &allocSendSegment;
+        module.free_send_segment = &freeSendSegment;
+        module.alloc_recv_segment = &countingAllocRecvSegment;
+        module.free_recv_segment = &countingFreeRecvSegment;
+        module.notify_event = &notifyEvent;
+        nabto_stream_init(&stream, &module, &counts);
+        uint8_t nonce[NABTO_STREAM_NONCE_SIZE];
+        memcpy(nonce, NONCE, sizeof(nonce));
+        nabto_stream_init_responder(&stream, nonce);
+        stream.state = ST_ESTABLISHED;
+        stream.nonceValidated = true;
+    }
+
+    ~CountingFixture()
+    {
+        nabto_stream_destroy(&stream);
+    }
+
+    struct nabto_stream_module module;
+    struct nabto_stream stream;
+    CountingUserData counts;
 };
 
 /**
@@ -194,6 +267,47 @@ std::vector<uint8_t> ackPayload(uint32_t maxAcked, uint32_t windowSize, size_t e
 uint16_t readU16(const uint8_t* p)
 {
     return (uint16_t)((p[0] << 8) | p[1]);
+}
+
+uint32_t readU32(const uint8_t* p)
+{
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
+}
+
+/** Data extension payload: seq followed by `size` bytes of data. */
+std::vector<uint8_t> dataPayload(uint32_t seq, size_t size)
+{
+    std::vector<uint8_t> out = PacketBuilder::be32(seq);
+    out.resize(4 + size, 0xab);
+    return out;
+}
+
+std::vector<uint8_t> dataPacket(uint32_t seq, size_t size)
+{
+    return PacketBuilder(NABTO_STREAM_FLAG_ACK, 42)
+        .ext(NABTO_STREAM_EXTENSION_DATA, dataPayload(seq, size))
+        .build();
+}
+
+std::vector<uint8_t> finPacket(uint32_t seq)
+{
+    return PacketBuilder(NABTO_STREAM_FLAG_ACK, 42)
+        .ext(NABTO_STREAM_EXTENSION_FIN, seq)
+        .build();
+}
+
+/**
+ * The window size field of the ack extension the stream would send now.
+ * Tops up the idle recv segment first, as the integrators do before
+ * building any packet.
+ */
+uint32_t advertisedWindow(struct nabto_stream* stream)
+{
+    nabto_stream_recv_segment_available(stream);
+    // 20 bytes of header and fixed fields plus room for all gap blocks.
+    std::vector<uint8_t> buf(20 + 8 * MAX_ACK_GAP_BLOCKS, 0xff);
+    BOOST_REQUIRE(nabto_stream_add_ack_extension(stream, buf.data(), buf.data() + buf.size()) != (uint8_t*)NULL);
+    return readU32(buf.data() + 8);
 }
 
 void handle(struct nabto_stream* stream, const std::vector<uint8_t>& packet)
@@ -608,6 +722,152 @@ BOOST_FIXTURE_TEST_CASE(create_rst_packet_with_tiny_buffer_returns_0, StreamFixt
     std::vector<uint8_t> buf(5, 0xff);
     BOOST_TEST(nabto_stream_create_packet(&stream, buf.data(), 5, ET_RST) == 5u);
     BOOST_TEST(buf[0] == NABTO_STREAM_FLAG_RST);
+}
+
+// H4: recv window bound
+
+BOOST_AUTO_TEST_CASE(data_far_above_recv_top_allocates_nothing)
+{
+    // The old receiver allocated one segment per sequence number up to the
+    // one in the packet, stopping only when the allocator failed.
+    const uint32_t seqs[] = { 0x7fffffffu, 0x80000000u, NABTO_STREAM_MAX_RECV_SEGMENTS + 1 };
+    for (size_t i = 0; i < sizeof(seqs)/sizeof(seqs[0]); i++) {
+        uint32_t seq = seqs[i];
+        CountingFixture f;
+        handle(&f.stream, dataPacket(seq, 1));
+
+        BOOST_TEST(f.counts.recvAllocs == 0u, "seq " << seq);
+        BOOST_TEST(f.stream.recvMaxAllocated == 0u, "seq " << seq);
+        BOOST_TEST(f.stream.recvMax == 0u, "seq " << seq);
+        BOOST_TEST(f.stream.recvTop == 0u, "seq " << seq);
+        BOOST_TEST(f.stream.imediateAck, "seq " << seq);
+        BOOST_TEST(f.stream.recvSegmentAllocationStamp.type == NABTO_STREAM_STAMP_INFINITE, "seq " << seq);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(fin_far_above_recv_top_allocates_nothing)
+{
+    const uint32_t seqs[] = { 0x7fffffffu, NABTO_STREAM_MAX_RECV_SEGMENTS + 1 };
+    for (size_t i = 0; i < sizeof(seqs)/sizeof(seqs[0]); i++) {
+        uint32_t seq = seqs[i];
+        CountingFixture f;
+        handle(&f.stream, finPacket(seq));
+
+        BOOST_TEST(f.counts.recvAllocs == 0u, "seq " << seq);
+        BOOST_TEST(f.stream.recvMax == 0u, "seq " << seq);
+        BOOST_TEST(f.stream.state == ST_ESTABLISHED, "seq " << seq);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(data_at_window_edge_is_accepted_and_one_past_is_dropped)
+{
+    const uint32_t window = NABTO_STREAM_MAX_RECV_SEGMENTS;
+    CountingFixture f;
+    handle(&f.stream, dataPacket(window, 4));
+    BOOST_TEST(f.counts.recvAllocs == window);
+    BOOST_TEST(f.stream.recvMaxAllocated == window);
+    BOOST_TEST(f.stream.recvMax == window);
+    BOOST_TEST(f.stream.recvTop == 0u);
+
+    handle(&f.stream, dataPacket(window + 1, 4));
+    BOOST_TEST(f.counts.recvAllocs == window);
+    BOOST_TEST(f.stream.recvMaxAllocated == window);
+    BOOST_TEST(f.stream.recvMax == window);
+
+    // the fin is subject to the same bound.
+    handle(&f.stream, finPacket(window + 1));
+    BOOST_TEST(f.counts.recvAllocs == window);
+    BOOST_TEST(f.stream.state == ST_ESTABLISHED);
+
+    // destroy frees the whole window (the fixture's second destroy is a no-op).
+    nabto_stream_destroy(&f.stream);
+    BOOST_TEST(f.counts.recvFrees == window);
+}
+
+BOOST_AUTO_TEST_CASE(advertised_window_tracks_recv_top)
+{
+    // The ack carries recvMax as maxAcked, so the window field must be the
+    // bound minus the segments already received above recvTop: the peer
+    // computes maxAcked + window = recvTop + bound. The old code advertised
+    // a constant 424242.
+    const uint32_t window = NABTO_STREAM_MAX_RECV_SEGMENTS;
+    CountingFixture f;
+    BOOST_TEST(advertisedWindow(&f.stream) == window);
+    BOOST_TEST(f.counts.recvAllocs == 1u);
+
+    // out of order data with a hole at 1 shrinks the window to zero.
+    const uint32_t checkpoints[] = { 2, window / 2, window };
+    for (uint32_t seq = 2; seq <= window; seq++) {
+        handle(&f.stream, dataPacket(seq, 4));
+        for (size_t i = 0; i < sizeof(checkpoints)/sizeof(checkpoints[0]); i++) {
+            if (seq == checkpoints[i]) {
+                BOOST_TEST(advertisedWindow(&f.stream) == window - seq, "seq " << seq);
+            }
+        }
+    }
+    BOOST_TEST(f.stream.recvMax == window);
+    BOOST_TEST(f.stream.recvTop == 0u);
+    // the top up keeps one idle segment past the window, which is never
+    // filled because find_recv_buffer rejects it.
+    BOOST_TEST(f.counts.recvAllocs == window + 1);
+
+    // filling the hole reopens the whole window.
+    handle(&f.stream, dataPacket(1, 4));
+    BOOST_TEST(f.stream.recvTop == window);
+    BOOST_TEST(advertisedWindow(&f.stream) == window);
+}
+
+BOOST_AUTO_TEST_CASE(closed_window_rejects_data_without_calling_the_allocator)
+{
+    // A recv segment could not be allocated: the window is advertised as
+    // closed, and data above recvMax is dropped without asking the
+    // allocator again, so a flood cannot keep pushing the retry.
+    CountingFixture f(1);
+    handle(&f.stream, dataPacket(1, 4));
+    BOOST_TEST(f.stream.recvTop == 1u);
+    BOOST_TEST(advertisedWindow(&f.stream) == 0u);
+    BOOST_REQUIRE(f.stream.recvSegmentAllocationStamp.type == NABTO_STREAM_STAMP_FUTURE);
+    size_t allocCalls = f.counts.recvAllocCalls;
+    uint32_t retryStamp = f.stream.recvSegmentAllocationStamp.stamp;
+    f.stream.imediateAck = false;
+
+    handle(&f.stream, dataPacket(2, 4));
+    BOOST_TEST(f.stream.recvMax == 1u);
+    BOOST_TEST(f.counts.recvAllocCalls == allocCalls);
+    BOOST_TEST(f.stream.recvSegmentAllocationStamp.type == NABTO_STREAM_STAMP_FUTURE);
+    BOOST_TEST(f.stream.recvSegmentAllocationStamp.stamp == retryStamp);
+    BOOST_TEST(f.stream.imediateAck);
+    f.stream.imediateAck = false;
+
+    // the retry succeeds: the window opens and an ack is forced.
+    f.counts.recvCap = 2;
+    nabto_stream_next_event_to_handle(&f.stream);
+    BOOST_TEST(f.counts.recvAllocs == 2u);
+    BOOST_TEST(f.stream.recvSegmentAllocationStamp.type == NABTO_STREAM_STAMP_INFINITE);
+    BOOST_TEST(f.stream.imediateAck);
+    BOOST_TEST(advertisedWindow(&f.stream) == (uint32_t)NABTO_STREAM_MAX_RECV_SEGMENTS);
+
+    handle(&f.stream, dataPacket(2, 4));
+    BOOST_TEST(f.stream.recvTop == 2u);
+}
+
+BOOST_AUTO_TEST_CASE(two_segments_in_one_packet_are_both_accepted)
+{
+    // After the first segment fills the pre-allocated idle segment there is
+    // no idle segment left; that must not read as a closed window for the
+    // second segment of the same packet.
+    CountingFixture f;
+    nabto_stream_recv_segment_available(&f.stream);
+    BOOST_REQUIRE(f.stream.recvMaxAllocated == 1u);
+    std::vector<uint8_t> packet = PacketBuilder(NABTO_STREAM_FLAG_ACK, 42)
+        .ext(NABTO_STREAM_EXTENSION_DATA, dataPayload(1, 4))
+        .ext(NABTO_STREAM_EXTENSION_DATA, dataPayload(2, 4))
+        .build();
+    handle(&f.stream, packet);
+
+    BOOST_TEST(f.stream.recvTop == 2u);
+    BOOST_TEST(f.stream.recvMax == 2u);
+    BOOST_TEST(f.counts.recvAllocs == 2u);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
