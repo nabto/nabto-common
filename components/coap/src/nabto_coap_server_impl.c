@@ -46,6 +46,7 @@ nabto_coap_error nabto_coap_server_requests_init(struct nabto_coap_server_reques
     requests->notifyEvent = notifyEvent;
     requests->userData = userData;
     requests->maxRequests = SIZE_MAX;
+    requests->maxRequestPayload = SIZE_MAX;
 
     // init requests list
     requests->requestsSentinel = server->allocator.calloc(1, sizeof(struct nabto_coap_server_request));
@@ -109,6 +110,11 @@ void nabto_coap_server_requests_destroy(struct nabto_coap_server_requests* reque
 void nabto_coap_server_limit_requests(struct nabto_coap_server_requests* requests, size_t limit)
 {
     requests->maxRequests = limit;
+}
+
+void nabto_coap_server_limit_request_size(struct nabto_coap_server_requests* requests, size_t limit)
+{
+    requests->maxRequestPayload = limit;
 }
 
 
