@@ -6,6 +6,7 @@ static struct nabto_coap_client_request* nabto_coap_client_find_request(struct n
 static bool nabto_coap_client_request_need_send(struct nabto_coap_client_request* request, uint32_t now);
 static bool nabto_coap_client_request_need_wait(struct nabto_coap_client_request* requst);
 static void nabto_coap_client_response_free(struct nabto_coap_client_response* response);
+static void nabto_coap_client_request_drop_response(struct nabto_coap_client_request* request);
 
 static uint8_t* nabto_coap_client_request_create_packet(struct nabto_coap_client_request* request, uint32_t now, uint8_t* buffer, uint8_t* end, void** connection);
 
@@ -19,8 +20,9 @@ nabto_coap_error nabto_coap_client_init(struct nabto_coap_client* client, struct
 {
     memset(client, 0, sizeof(struct nabto_coap_client));
     client->allocator = *allocator;
-    client->settings.ackTimeoutMilliseconds = 2000;
-    client->settings.maxRetransmits = 6;
+    client->settings.ackTimeoutMilliseconds = NABTO_COAP_ACK_TIMEOUT;
+    client->settings.maxRetransmits = NABTO_COAP_MAX_RETRANSMITS;
+    client->settings.maxResponsePayload = SIZE_MAX;
     client->messageIdCounter = 0;
     client->tokenCounter = 0;
     client->notifyEvent = notifyEvent;
@@ -40,6 +42,11 @@ void nabto_coap_client_destroy(struct nabto_coap_client* client)
     nn_allocator_free(&client->allocator, client->requestsSentinel);
     //client->allocator.free(client->requestsSentinel);
     client->requestsSentinel = NULL;
+}
+
+void nabto_coap_client_limit_response_size(struct nabto_coap_client* client, size_t limit)
+{
+    client->settings.maxResponsePayload = limit;
 }
 
 // insert request after e1 such that the chain e1->e2->e3 emerges
@@ -70,7 +77,8 @@ void nabto_coap_client_handle_callback(struct nabto_coap_client* client)
             if (iterator->isObserve && !iterator->observeDeregister &&
                 iterator->response != NULL && iterator->response->hasObserve &&
                 iterator->status != NABTO_COAP_CLIENT_STATUS_STOPPED &&
-                iterator->status != NABTO_COAP_CLIENT_STATUS_TIMEOUT) {
+                iterator->status != NABTO_COAP_CLIENT_STATUS_TIMEOUT &&
+                iterator->status != NABTO_COAP_CLIENT_STATUS_RESET) {
                 // Observe notification: keep request alive for more
                 // notifications. Only re-arm when the response actually
                 // carries the Observe option — otherwise the server didn't
@@ -183,24 +191,28 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
         response->observe = message->observe;
     }
 
+    // Bound the response body, whether it arrives as Block2 blocks or
+    // in a single packet.
+    if (response->payloadLength + message->payloadLength > client->settings.maxResponsePayload) {
+        nabto_coap_client_request_drop_response(request);
+        return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
+    }
+
     if (message->hasBlock2) {
         size_t offset = NABTO_COAP_BLOCK_OFFSET(message->block2);
         if (offset != response->payloadLength) {
-            client->allocator.free(response);
-            request->response = NULL;
+            nabto_coap_client_request_drop_response(request);
             return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
         }
 
         if (NABTO_COAP_BLOCK_MORE(message->block2) && message->payloadLength != NABTO_COAP_BLOCK_SIZE_ABSOLUTE(message->block2)) {
-            client->allocator.free(response);
-            request->response = NULL;
+            nabto_coap_client_request_drop_response(request);
             return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
         }
 
         void* payload = client->allocator.calloc(1, (response->payloadLength + message->payloadLength + 1));
         if (!payload) {
-            client->allocator.free(response);
-            request->response = NULL;
+            nabto_coap_client_request_drop_response(request);
             return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
         }
         if (response->payload) {
@@ -217,8 +229,7 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
         if (message->payloadLength > 0) {
             response->payload = (uint8_t*)client->allocator.calloc(1, message->payloadLength + 1);
             if (response->payload == NULL) {
-                client->allocator.free(response);
-                request->response = NULL;
+                nabto_coap_client_request_drop_response(request);
                 return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
             }
             memcpy(response->payload, message->payload, message->payloadLength);
@@ -231,6 +242,7 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
         if (request->block1Current * NABTO_COAP_BLOCK_SIZE_ABSOLUTE(request->block1Size) < request->payloadLength) {
             request->state = NABTO_COAP_CLIENT_REQUEST_STATE_SEND_REQUEST;
             request->messageId = nabto_coap_client_next_message_id(client);
+            request->retransmissions = 0;
             return NABTO_COAP_CLIENT_STATUS_OK;
         }
     }
@@ -241,11 +253,13 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
         }
         request->state = NABTO_COAP_CLIENT_REQUEST_STATE_SEND_REQUEST;
         request->messageId = nabto_coap_client_next_message_id(client);
+        request->retransmissions = 0;
     } else if (message->hasBlock1 && message->code == NABTO_COAP_CODE_CONTINUE) {
         request->block1Current += 1;
         if (request->block1Current * NABTO_COAP_BLOCK_SIZE_ABSOLUTE(request->block1Size) < request->payloadLength) {
             request->state = NABTO_COAP_CLIENT_REQUEST_STATE_SEND_REQUEST;
             request->messageId = nabto_coap_client_next_message_id(client);
+            request->retransmissions = 0;
         }
     } else {
         if (message->type == NABTO_COAP_TYPE_CON) {
@@ -282,6 +296,7 @@ void nabto_coap_client_handle_rst(struct nabto_coap_client* client, struct nabto
             iterator->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE)
         {
             if (iterator->messageId == message->messageId && iterator->connection == connection) {
+                iterator->status = NABTO_COAP_CLIENT_STATUS_RESET;
                 iterator->state = NABTO_COAP_CLIENT_REQUEST_STATE_DONE_CALLBACK;
                 return;
             }
@@ -424,7 +439,7 @@ uint8_t* nabto_coap_client_request_create_packet(struct nabto_coap_client_reques
 {
     struct nabto_coap_message_header header;
     memset(&header, 0, sizeof(struct nabto_coap_message_header));
-    header.type = NABTO_COAP_TYPE_CON;
+    header.type = request->type;
     header.code = request->method;
     header.messageId = request->messageId;
     header.token = request->token;
@@ -493,9 +508,18 @@ uint8_t* nabto_coap_client_request_create_packet(struct nabto_coap_client_reques
 
     struct nabto_coap_client* client = request->client;
 
-    request->state = NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_ACK;
-    request->timeoutStamp = now + client->settings.ackTimeoutMilliseconds;
-    request->retransmissions += 1;
+    if (request->type == NABTO_COAP_TYPE_NON) {
+        // RFC 7252 section 4.3: a NON message is not acknowledged, so
+        // there is nothing to retransmit on; wait for the response
+        // like an acked CON does.
+        request->state = NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE;
+        request->timeoutStamp = now + request->configuredTimeoutMilliseconds;
+    } else {
+        // RFC 7252 section 4.2: the ack timeout doubles for each
+        // retransmission.
+        request->state = NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_ACK;
+        request->timeoutStamp = now + (client->settings.ackTimeoutMilliseconds << request->retransmissions);
+    }
 
     return ptr;
 }
@@ -556,7 +580,9 @@ void nabto_coap_client_handle_timeout(struct nabto_coap_client* client, uint32_t
         if (nabto_coap_client_request_need_wait(request)) {
             if (request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_ACK) {
                 if (nabto_coap_is_stamp_less_equal(request->timeoutStamp, now)) {
-                    if (request->retransmissions > client->settings.maxRetransmits) {
+                    // RFC 7252 section 4.2: retransmit up to
+                    // MAX_RETRANSMIT times, then give up.
+                    if (request->retransmissions >= client->settings.maxRetransmits) {
                         request->status = NABTO_COAP_CLIENT_STATUS_TIMEOUT;
                         request->state = NABTO_COAP_CLIENT_REQUEST_STATE_DONE_CALLBACK;
                     } else {
@@ -666,10 +692,20 @@ void nabto_coap_client_request_cancel(struct nabto_coap_client_request* request)
 
 static void nabto_coap_client_response_free(struct nabto_coap_client_response* response) {
     struct nabto_coap_client* client = response->request->client;
-    if (response->payloadLength != 0) {
+    if (response->payload != NULL) {
         client->allocator.free(response->payload);
     }
     client->allocator.free(response);
+}
+
+// Release the response of a request, including the payload
+// reassembled so far.
+static void nabto_coap_client_request_drop_response(struct nabto_coap_client_request* request)
+{
+    if (request->response != NULL) {
+        nabto_coap_client_response_free(request->response);
+        request->response = NULL;
+    }
 }
 
 /**

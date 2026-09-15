@@ -29,13 +29,16 @@ enum nabto_coap_client_status {
     NABTO_COAP_CLIENT_STATUS_TIMEOUT,
     NABTO_COAP_CLIENT_STATUS_IN_PROGRESS,
     NABTO_COAP_CLIENT_STATUS_STOPPED,
-    NABTO_COAP_CLIENT_STATUS_OBSERVE_NOTIFICATION
+    NABTO_COAP_CLIENT_STATUS_OBSERVE_NOTIFICATION,
+    // The peer rejected the request or the response with a RST.
+    NABTO_COAP_CLIENT_STATUS_RESET
 };
 
 
 struct nabto_coap_client_settings {
     uint32_t ackTimeoutMilliseconds;
     uint8_t maxRetransmits;
+    size_t maxResponsePayload; // max reassembled response body
 };
 
 struct nabto_coap_client_response;
@@ -148,6 +151,7 @@ bool nabto_coap_client_response_get_observe(struct nabto_coap_client_response* r
  *   NABTO_COAP_CLIENT_STATUS_OK           if ok.
  *   NABTO_COAP_CLIENT_STATUS_TIMEOUT      if request has timedout.
  *   NABTO_COAP_CLIENT_STATUS_IN_PROGRESS  if request is in progress.
+ *   NABTO_COAP_CLIENT_STATUS_RESET        if the peer answered with a RST.
  */
 enum nabto_coap_client_status nabto_coap_client_request_get_status(struct nabto_coap_client_request* request);
 
@@ -172,6 +176,14 @@ void nabto_coap_client_destroy(struct nabto_coap_client* client);
  * All outstanding request will be freed by the requestor.
  */
 void nabto_coap_client_stop(struct nabto_coap_client* client);
+
+/**
+ * Limit the size of a response body. A response whose body,
+ * reassembled from Block2 blocks or sent in one packet, would exceed
+ * the limit is dropped and reported as a decode error. Unlimited by
+ * default.
+ */
+void nabto_coap_client_limit_response_size(struct nabto_coap_client* client, size_t limit);
 
 enum nabto_coap_client_next_event nabto_coap_client_get_next_event(struct nabto_coap_client* client, uint32_t now);
 
