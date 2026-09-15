@@ -10,59 +10,63 @@ nabto_coap_code nabto_coap_uint16_to_code(uint16_t code)
 }
 
 
+/**
+ * Decode an option delta or length field, RFC 7252 section 3.1. The
+ * nibble from the first byte of the option is followed by no, one or
+ * two extension bytes at ptr.
+ *
+ * @return pointer past the extension bytes, or NULL if the nibble is
+ * the reserved value 15 or the extension bytes are not present.
+ */
+static const uint8_t* decode_option_field(uint8_t nibble, const uint8_t* ptr, const uint8_t* end, uint32_t* value)
+{
+    if (nibble < 13) {
+        *value = nibble;
+        return ptr;
+    } else if (nibble == 13) {
+        // one extra byte
+        if (end - ptr < 1) {
+            return NULL;
+        }
+        *value = ((uint32_t)ptr[0]) + 13;
+        return ptr + 1;
+    } else if (nibble == 14) {
+        // two extra bytes, 269 = 255 + 14
+        if (end - ptr < 2) {
+            return NULL;
+        }
+        *value = (((uint32_t)ptr[0]) << 8) + ((uint32_t)ptr[1]) + 269;
+        return ptr + 2;
+    } else {
+        // reserved
+        return NULL;
+    }
+}
+
 struct nabto_coap_option_iterator* nabto_coap_get_next_option(struct nabto_coap_option_iterator* iterator)
 {
-    if (iterator->buffer == NULL || iterator->buffer + 1 > iterator->bufferEnd) {
+    if (iterator->buffer == NULL || iterator->bufferEnd - iterator->buffer < 1) {
         return NULL;
     }
 
     const uint8_t* ptr = iterator->buffer;
     const uint8_t* end = iterator->bufferEnd;
 
-    uint32_t length = ((*ptr) & 0x0F);
-    uint32_t delta = (*ptr) >> 4;
-
+    uint8_t first = *ptr;
     ptr += 1;
 
-    if (delta == 13) {
-        // one extra byte;
-        if (end < ptr || end - ptr < 1) {
-            return NULL;
-        }
-        delta = ((uint32_t)(*ptr)) + 13;
-        ptr += 1;
-    } else if (delta == 14) {
-        // two extra bytes
-        if (end < ptr || end - ptr < 2) {
-            return NULL;
-        }
-        // 269 = 255 + 14
-        delta = (((uint32_t)ptr[0]) << 8) + ((uint32_t)ptr[1]) + 269;
-        ptr += 2;
-    } else if (delta == 15) {
+    uint32_t delta;
+    uint32_t length;
+    ptr = decode_option_field(first >> 4, ptr, end, &delta);
+    if (ptr == NULL) {
+        return NULL;
+    }
+    ptr = decode_option_field(first & 0x0F, ptr, end, &length);
+    if (ptr == NULL) {
         return NULL;
     }
 
-    if (length == 13) {
-        // one extra bytes
-        if (end < ptr || end - ptr < 1) {
-            return NULL;
-        }
-        length = ((uint32_t)*ptr) + 13;
-        ptr += 1;
-    } else if (length == 14) {
-        // two extra bytes
-        if (end < ptr || end - ptr < 2) {
-            return NULL;
-        }
-        length = (((uint32_t)ptr[0]) << 8) + ((uint32_t)ptr[1]) + 269;
-        ptr += 2;
-    } else if (length == 15) {
-        // error
-        return NULL;
-    }
-
-    if (length > (end - ptr)) {
+    if ((size_t)(end - ptr) < length) {
         return NULL;
     }
 
@@ -144,109 +148,60 @@ bool nabto_coap_parse_message(const uint8_t* packet, size_t packetSize, struct n
 
     msg->options = ptr;
 
-
-
-    while (true) {
-        if (end - ptr == 0 || *ptr == 0xFF) {
-            break;
-        }
-
-        uint32_t length = ((*ptr) & 0x0F);
-        uint16_t delta = (*ptr) >> 4;
-
-        ptr += 1;
-
-        // The delta value is not needed here, only the number of
-        // extension bytes it occupies. Check that they are present
-        // before stepping over them so ptr never points past end.
-        if (delta == 13) {
-            // one extra byte;
-            if (end - ptr < 1) {
-                return false;
-            }
-            ptr += 1;
-        } else if (delta == 14) {
-            // two extra bytes
-            if (end - ptr < 2) {
-                return false;
-            }
-            ptr += 2;
-        } else if (delta == 15) {
-            return false;
-        }
-
-        if (length == 13) {
-            // one extra bytes
-            if (end - ptr < 1) {
-                return false;
-            }
-            length = ((uint32_t)*ptr) + 13;
-            ptr += 1;
-        } else if (length == 14) {
-            // two extra bytes
-            if (end - ptr < 2) {
-                return false;
-            }
-            length = (((uint32_t)ptr[0]) << 8) + ((uint32_t)ptr[1]) + 269;
-            ptr += 2;
-        } else if (length == 15) {
-            // error
-            return false;
-        }
-        // skip payload length
-        if (end - ptr < length) {
-            return false;
-        }
-        ptr += length;
-    }
-
-    msg->optionsLength = ptr - msg->options;
-
+    // Walk the options once: this both validates their framing and
+    // decodes the non repeatable options the message struct carries.
     struct nabto_coap_option_iterator iteratorData;
     struct nabto_coap_option_iterator* iterator = &iteratorData;
 
-    nabto_coap_option_iterator_init(iterator, msg->options, msg->options + msg->optionsLength);
+    nabto_coap_option_iterator_init(iterator, msg->options, end);
     iterator = nabto_coap_get_next_option(iterator);
     while (iterator != NULL) {
         uint32_t value;
-        if (iterator->option == NABTO_COAP_OPTION_OBSERVE) {
-            if (!nabto_coap_parse_variable_int(iterator->optionDataBegin, iterator->optionDataEnd, 3, &value)) {
-                return false;
-            } else {
+        switch (iterator->option) {
+            case NABTO_COAP_OPTION_OBSERVE:
+                if (!nabto_coap_parse_variable_int(iterator->optionDataBegin, iterator->optionDataEnd, 3, &value)) {
+                    return false;
+                }
                 msg->hasObserve = true;
                 msg->observe = value;
-            }
-        } else if (iterator->option == NABTO_COAP_OPTION_CONTENT_FORMAT) {
-            if (!nabto_coap_parse_variable_int(iterator->optionDataBegin, iterator->optionDataEnd, 2, &value)) {
-                return false;
-            } else {
+                break;
+            case NABTO_COAP_OPTION_CONTENT_FORMAT:
+                if (!nabto_coap_parse_variable_int(iterator->optionDataBegin, iterator->optionDataEnd, 2, &value)) {
+                    return false;
+                }
                 msg->hasContentFormat = true;
                 msg->contentFormat = (uint16_t)value;
-            }
-        } else if (iterator->option == NABTO_COAP_OPTION_BLOCK1) {
-            if (!nabto_coap_parse_variable_int(iterator->optionDataBegin, iterator->optionDataEnd, 3, &value)) {
-                return false;
-            } else {
+                break;
+            case NABTO_COAP_OPTION_BLOCK1:
+                if (!nabto_coap_parse_variable_int(iterator->optionDataBegin, iterator->optionDataEnd, 3, &value)) {
+                    return false;
+                }
                 msg->hasBlock1 = true;
                 msg->block1 = value;
-            }
-        } else if (iterator->option == NABTO_COAP_OPTION_BLOCK2) {
-            if (!nabto_coap_parse_variable_int(iterator->optionDataBegin, iterator->optionDataEnd, 3, &value)) {
-                return false;
-            } else {
+                break;
+            case NABTO_COAP_OPTION_BLOCK2:
+                if (!nabto_coap_parse_variable_int(iterator->optionDataBegin, iterator->optionDataEnd, 3, &value)) {
+                    return false;
+                }
                 msg->hasBlock2 = true;
                 msg->block2 = value;
-            }
+                break;
+            default:
+                break;
         }
         iterator = nabto_coap_get_next_option(iterator);
     }
 
+    // The iterator stops at the end of the packet, at the payload
+    // marker, or at an option it could not decode. Only the first two
+    // are a well formed option list.
+    ptr = iteratorData.buffer;
+    msg->optionsLength = ptr - msg->options;
 
     if (end - ptr == 0) {
         // end of options no payload
         msg->payload = NULL;
         msg->payloadLength = 0;
-
         return true;
     }
     if (*ptr == 0xFF) {
@@ -262,7 +217,7 @@ bool nabto_coap_parse_message(const uint8_t* packet, size_t packetSize, struct n
         return true;
     }
 
-    // never here.
+    // malformed option
     return false;
 }
 
@@ -287,6 +242,38 @@ uint8_t* nabto_coap_encode_header(struct nabto_coap_message_header* header, uint
     return ptr;
 }
 
+/**
+ * Encode an option delta or length field, RFC 7252 section 3.1. The
+ * nibble for the first byte of the option is returned through nibble,
+ * the no, one or two extension bytes are written at ptr.
+ *
+ * @return pointer past the extension bytes, or NULL if they do not fit
+ * before end.
+ */
+static uint8_t* encode_option_field(uint32_t value, uint8_t* ptr, uint8_t* end, uint8_t* nibble)
+{
+    if (value < 13) {
+        *nibble = (uint8_t)value;
+        return ptr;
+    } else if (value < 269) {
+        if (end - ptr < 1) {
+            return NULL;
+        }
+        *nibble = 13;
+        ptr[0] = (uint8_t)(value - 13);
+        return ptr + 1;
+    } else {
+        if (end - ptr < 2) {
+            return NULL;
+        }
+        *nibble = 14;
+        value -= 269;
+        ptr[0] = (uint8_t)(value >> 8);
+        ptr[1] = (uint8_t)(value);
+        return ptr + 2;
+    }
+}
+
 uint8_t* nabto_coap_encode_option(uint16_t optionDelta, const uint8_t* optionData, size_t optionDataLength, uint8_t* buffer, uint8_t* bufferEnd)
 {
     // RFC 7252 section 3.1: the option length field with two extension
@@ -295,52 +282,31 @@ uint8_t* nabto_coap_encode_option(uint16_t optionDelta, const uint8_t* optionDat
     if (optionDataLength > NABTO_COAP_MAX_OPTION_LENGTH) {
         return NULL;
     }
-    if (buffer == NULL ||
-        (bufferEnd - buffer) < (ptrdiff_t)(5 + optionDataLength))
-    {
+    if (buffer == NULL || bufferEnd - buffer < 1) {
         return NULL;
     }
+
+    uint8_t deltaNibble;
+    uint8_t lengthNibble;
     uint8_t* ptr = buffer + 1;
-    uint8_t firstByte = 0;
-    if (optionDelta < 13) {
-        firstByte |= (uint8_t)(optionDelta << 4);
-    } else if (optionDelta < (256 + 13) ) {
-        firstByte |= (13 << 4);
-        optionDelta -= 13;
-        *ptr = (uint8_t)(optionDelta);
-        ptr++;
-    } else {
-        firstByte |= (14 << 4);
-        optionDelta -= (256 + 13);
-        *ptr = (uint8_t)(optionDelta >> 8);
-        ptr++;
-        *ptr = (uint8_t)(optionDelta);
-        ptr++;
+    ptr = encode_option_field(optionDelta, ptr, bufferEnd, &deltaNibble);
+    if (ptr == NULL) {
+        return NULL;
+    }
+    ptr = encode_option_field((uint32_t)optionDataLength, ptr, bufferEnd, &lengthNibble);
+    if (ptr == NULL) {
+        return NULL;
+    }
+    if ((size_t)(bufferEnd - ptr) < optionDataLength) {
+        return NULL;
     }
 
-    if (optionDataLength < 13) {
-        firstByte |= optionDataLength;
-    } else if (optionDataLength < (256 + 13)) {
-        firstByte |= 13;
-        size_t adjustedLength = optionDataLength - 13;
-        *ptr = (uint8_t)adjustedLength;
-        ptr++;
-    } else {
-        firstByte |= 14;
-        size_t adjustedLength = optionDataLength - (256 + 13);
-        *ptr = (uint8_t)(adjustedLength >> 8);
-        ptr++;
-        *ptr = (uint8_t)(adjustedLength);
-        ptr++;
-    }
-
-    *buffer = firstByte;
+    *buffer = (uint8_t)((deltaNibble << 4) | lengthNibble);
 
     if (optionDataLength > 0) {
         memcpy(ptr, optionData, optionDataLength);
     }
     return ptr + optionDataLength;
-
 }
 
 uint8_t* nabto_coap_encode_payload(const uint8_t* payloadBegin, size_t payloadLength, uint8_t* buffer, uint8_t* bufferEnd)
