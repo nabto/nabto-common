@@ -114,10 +114,13 @@ void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests
             nabto_coap_server_handle_ack(requests, response->request, &msg);
             return;
         }
-        // Check if ACK is for an observer notification
+        // Check if ACK is for an observer notification. RFC 7252 section
+        // 4.2: the message id only matches while the CON is in flight;
+        // before the first notification it is 0 and would otherwise match
+        // any stray ACK with that id.
         struct nabto_coap_server_observer* obs = requests->observersSentinel->next;
         while (obs != requests->observersSentinel) {
-            if (obs->connection == connection && obs->messageId == msg.messageId) {
+            if (obs->waitingForAck && obs->connection == connection && obs->messageId == msg.messageId) {
                 // Notification was acknowledged, clear in-flight state.
                 struct nabto_coap_server* server = requests->server;
                 if (obs->payload) {
@@ -465,12 +468,14 @@ void nabto_coap_server_handle_rst(struct nabto_coap_server_requests* requests, u
         request = request->next;
     }
 
-    // Check if RST matches an observer notification
+    // Check if RST matches an observer notification in flight. Before
+    // the first notification the message id is 0, so a RST with that id
+    // must not remove a freshly registered observer.
     struct nabto_coap_server_observer* obs = requests->observersSentinel->next;
     while (obs != requests->observersSentinel) {
         struct nabto_coap_server_observer* current = obs;
         obs = obs->next;
-        if (current->connection == connection && current->messageId == messageId) {
+        if (current->waitingForAck && current->connection == connection && current->messageId == messageId) {
             nabto_coap_server_observer_free(current);
             return;
         }

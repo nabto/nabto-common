@@ -886,8 +886,21 @@ void nabto_coap_server_observer_remove_from_list(struct nabto_coap_server_observ
 
 void nabto_coap_server_observer_free(struct nabto_coap_server_observer* observer)
 {
-    struct nabto_coap_server* server = observer->requests->server;
+    struct nabto_coap_server_requests* requests = observer->requests;
+    struct nabto_coap_server* server = requests->server;
     nabto_coap_server_observer_remove_from_list(observer);
+
+    // The request which registered the observer may still be alive,
+    // retransmitting its initial response or held by the application,
+    // and would otherwise keep pointing at freed memory.
+    struct nabto_coap_server_request* request = requests->requestsSentinel->next;
+    while (request != requests->requestsSentinel) {
+        if (request->observer == observer) {
+            request->observer = NULL;
+        }
+        request = request->next;
+    }
+
     if (observer->payload) {
         server->allocator.free(observer->payload);
     }
