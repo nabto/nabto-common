@@ -9,6 +9,7 @@ static void nabto_coap_client_response_free(struct nabto_coap_client_response* r
 static void nabto_coap_client_request_drop_response(struct nabto_coap_client_request* request);
 
 static uint8_t* nabto_coap_client_request_create_packet(struct nabto_coap_client_request* request, uint32_t now, uint8_t* buffer, uint8_t* end, void** connection);
+static uint32_t nabto_coap_client_ack_timeout(struct nabto_coap_client* client, uint8_t retransmissions);
 
 static uint16_t nabto_coap_client_next_message_id(struct nabto_coap_client* client);
 
@@ -515,19 +516,28 @@ uint8_t* nabto_coap_client_request_create_packet(struct nabto_coap_client_reques
         request->state = NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE;
         request->timeoutStamp = now + request->configuredTimeoutMilliseconds;
     } else {
-        // RFC 7252 section 4.2: the ack timeout doubles for each
-        // retransmission. Stop doubling before the deadline leaves the
-        // half range the signed stamp comparisons can order, whatever
-        // maxRetransmits the integrator picked.
-        uint32_t timeout = client->settings.ackTimeoutMilliseconds;
-        for (uint8_t i = 0; i < request->retransmissions && timeout < (1u << 30); i++) {
-            timeout *= 2;
-        }
         request->state = NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_ACK;
-        request->timeoutStamp = now + timeout;
+        request->timeoutStamp = now + nabto_coap_client_ack_timeout(client, request->retransmissions);
     }
 
     return ptr;
+}
+
+// RFC 7252 section 4.2: the ack timeout doubles for each
+// retransmission. Stamps are ordered by their signed 32 bit difference,
+// so the result is kept below 2^31 whatever ackTimeoutMilliseconds and
+// maxRetransmits the integrator picked.
+static uint32_t nabto_coap_client_ack_timeout(struct nabto_coap_client* client, uint8_t retransmissions)
+{
+    const uint32_t max = 1u << 30;
+    uint32_t timeout = client->settings.ackTimeoutMilliseconds;
+    if (timeout > max) {
+        timeout = max;
+    }
+    for (uint8_t i = 0; i < retransmissions && timeout < max; i++) {
+        timeout *= 2;
+    }
+    return timeout;
 }
 
 uint8_t* nabto_coap_client_create_ack_packet(struct nabto_coap_client_request* request, uint8_t* buffer, uint8_t* end)
@@ -600,9 +610,14 @@ void nabto_coap_client_handle_timeout(struct nabto_coap_client* client, uint32_t
                 if (nabto_coap_is_stamp_less_equal(request->timeoutStamp, now)) {
                     request->status = NABTO_COAP_CLIENT_STATUS_TIMEOUT;
                     request->state = NABTO_COAP_CLIENT_REQUEST_STATE_DONE_CALLBACK;
-                    client->needSendRst = true;
-                    client->messageIdRst = request->messageId;
-                    client->connectionRst = request->connection;
+                    // RFC 7252 section 4.3: a NON message is never
+                    // acknowledged or reset, so there is nothing for
+                    // a RST to refer to.
+                    if (request->type == NABTO_COAP_TYPE_CON) {
+                        client->needSendRst = true;
+                        client->messageIdRst = request->messageId;
+                        client->connectionRst = request->connection;
+                    }
                 }
                 /**
                  * we have received an ack on our con request, we are
@@ -686,9 +701,13 @@ void nabto_coap_client_request_cancel(struct nabto_coap_client_request* request)
     } else if (request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_ACK ||
                request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE)
     {
-        client->needSendRst = true;
-        client->messageIdRst = request->messageId;
-        client->connectionRst = request->connection;
+        // RFC 7252 section 4.3: a NON message is never acknowledged or
+        // reset, so there is nothing for a RST to refer to.
+        if (request->type == NABTO_COAP_TYPE_CON) {
+            client->needSendRst = true;
+            client->messageIdRst = request->messageId;
+            client->connectionRst = request->connection;
+        }
         request->state = NABTO_COAP_CLIENT_REQUEST_STATE_DONE_CALLBACK;
         request->status = NABTO_COAP_CLIENT_STATUS_STOPPED;
         client->notifyEvent(client->userData);

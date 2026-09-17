@@ -316,6 +316,18 @@ BOOST_AUTO_TEST_CASE(retransmit_count_equals_max_retransmits)
 // by 32 or more never happens.
 BOOST_AUTO_TEST_CASE(ack_backoff_stops_before_the_stamp_range)
 {
+    {
+        // A base timeout past the range is clamped to it.
+        TestClient c;
+        c.client.settings.ackTimeoutMilliseconds = 0x80000000u;
+        c.sendRequest();
+        BOOST_TEST(c.request->timeoutStamp == c.now + (1u << 30));
+        nabto_coap_client_handle_timeout(&c.client, c.now + (1u << 30) - 1);
+        BOOST_TEST(c.drain().empty());
+        nabto_coap_client_handle_timeout(&c.client, c.now + (1u << 30));
+        BOOST_TEST(c.drain().size() == 1u);
+    }
+
     TestClient c;
     c.client.settings.maxRetransmits = 40;
     const uint32_t ackTimeout = c.client.settings.ackTimeoutMilliseconds;
@@ -375,6 +387,48 @@ BOOST_AUTO_TEST_CASE(nonconfirmable_request_is_sent_as_non)
     size_t payloadLength;
     BOOST_TEST(nabto_coap_client_response_get_payload(response, &payload, &payloadLength));
     BOOST_TEST(std::string((const char*)payload, payloadLength) == "hello");
+}
+
+// A RST only ever answers a received message (RFC 7252 section 4.2),
+// and a NON request is never acknowledged or reset (section 4.3), so
+// neither a response timeout nor a cancel of a NON request may send
+// one. A CON request in the same situation still does.
+BOOST_AUTO_TEST_CASE(nonconfirmable_request_never_sends_rst)
+{
+    {
+        // Response timeout.
+        TestClient c;
+        nabto_coap_client_request_set_nonconfirmable(c.request);
+        nabto_coap_client_request_set_timeout(c.request, 5000);
+        c.sendRequest();
+        c.now += 5000;
+        nabto_coap_client_handle_timeout(&c.client, c.now);
+        BOOST_TEST(c.drain().empty());
+        BOOST_TEST(c.runCallback());
+        BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_TIMEOUT);
+    }
+    {
+        // Cancel.
+        TestClient c;
+        nabto_coap_client_request_set_nonconfirmable(c.request);
+        c.sendRequest();
+        nabto_coap_client_request_cancel(c.request);
+        BOOST_TEST(c.drain().empty());
+        BOOST_TEST(c.runCallback());
+        BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_STOPPED);
+    }
+    {
+        // A cancelled CON request still sends the RST.
+        TestClient c;
+        SentMessage req = c.sendRequest();
+        nabto_coap_client_request_cancel(c.request);
+        std::vector<SentMessage> sent = c.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_RST);
+        BOOST_TEST(sent[0].messageId == req.messageId);
+        BOOST_TEST(c.runCallback());
+        BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_STOPPED);
+    }
 }
 
 // Audit M7 (sc-4821): the response reassembled from Block2 blocks had
