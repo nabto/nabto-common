@@ -1312,4 +1312,73 @@ BOOST_AUTO_TEST_CASE(delayed_ack_or_rst_matches_queued_notification_retransmit)
     }
 }
 
+// Audit N1 (sc-4858): a request gets its response message id when it
+// is created, before anything is sent, and an ACK or RST used to be
+// matched against it in every state. For a request still being
+// received it set the state to DONE without the user ever owning it,
+// so nothing freed it: the request, its body and its maxRequests slot
+// were pinned until reboot, and further chunks were dropped. Ids are
+// sequential, so a client can guess the next one. An ACK or RST only
+// matches a response in flight; the transfer completes as usual.
+BOOST_AUTO_TEST_CASE(rst_or_ack_for_unsent_response_id_keeps_block1_request)
+{
+    for (int rst = 0; rst <= 1; rst++) {
+        TestServer s;
+        const std::string chunk0(16, 'a');
+        const std::string chunk1(16, 'b');
+        uint16_t messageId = (uint16_t)(0xb100 + 2 * rst);
+
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, messageId, "t1").block1(0, true, 0).payload(chunk0).build());
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTINUE);
+        BOOST_TEST(s.handlerCalls == 0u);
+        BOOST_TEST(s.requests.activeRequests == 1u);
+
+        uint16_t responseId = s.requests.requestsSentinel->next->response.messageId;
+        s.handlePacket(rst ? rstPacket(responseId) : ackPacket(responseId));
+        BOOST_TEST(s.drain().empty());
+        BOOST_TEST(s.requests.activeRequests == 1u);
+
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, (uint16_t)(messageId + 1), "t1").block1(1, false, 0).payload(chunk1).build());
+        sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+        BOOST_TEST(sent[0].code == NABTO_COAP_CODE_EMPTY);
+        BOOST_REQUIRE(s.handlerCalls == 1u);
+        void* payload;
+        size_t payloadLength;
+        BOOST_TEST(nabto_coap_server_request_get_payload(s.request, &payload, &payloadLength));
+        BOOST_TEST(std::string((const char*)payload, payloadLength) == chunk0 + chunk1);
+
+        s.respondAndFinish(NABTO_COAP_CODE_CHANGED);
+    }
+}
+
+// A response that is ready but not yet sent has an id the client has
+// not seen either; an ACK with it matches nothing and the response is
+// sent as usual.
+BOOST_AUTO_TEST_CASE(ack_for_unsent_response_is_ignored)
+{
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xb200, "t1").build());
+    BOOST_TEST(s.drain().size() == 1u); // empty ACK
+    BOOST_REQUIRE(s.request != NULL);
+    uint16_t responseId = s.request->response.messageId;
+    s.respondNoAck(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+
+    s.handlePacket(ackPacket(responseId));
+    BOOST_TEST(s.requests.activeRequests == 1u);
+
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_CON);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTENT);
+    BOOST_TEST(sent[0].messageId == responseId);
+
+    s.handlePacket(ackPacket(responseId));
+    BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
 BOOST_AUTO_TEST_SUITE_END()
