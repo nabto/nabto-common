@@ -371,6 +371,15 @@ void nabto_coap_server_handle_data_for_response(struct nabto_coap_server_request
             return;
         }
 
+        // RFC 7252 section 4.2: the block request is a CON of its own
+        // and gets its own empty ACK; the block follows as a separate
+        // response. Recording the message id lets a retransmitted block
+        // request be acked again without setting up the block once more.
+        request->messageId = message->messageId;
+        if (message->type == NABTO_COAP_TYPE_CON) {
+            nabto_coap_server_queue_ack(requests, request->connection, message->messageId);
+        }
+
         response->block2Current = NABTO_COAP_BLOCK_NUM(message->block2);
         response->block2Size = NABTO_COAP_BLOCK_SIZE(message->block2);
         response->messageId = nabto_coap_server_next_message_id(requests);
