@@ -361,7 +361,14 @@ void handle(struct nabto_stream* stream, const std::vector<uint8_t>& packet)
  * first data segment has seq 1.
  */
 struct SenderFixture {
-    explicit SenderFixture(uint32_t window)
+    /**
+     * Complete the handshake as the initiator. The syn|ack carries the
+     * peer's logical stamp `peerStampBase` and the acks that follow count
+     * on from it. A base at or above 2^31 compares as "before 0" in the
+     * wrap safe stamp comparison, which is what the wrap-around case needs.
+     */
+    explicit SenderFixture(uint32_t window, uint32_t peerStampBase = 42)
+        : peerStamp(peerStampBase)
     {
         memset(&module, 0, sizeof(module));
         module.get_stamp = &getStamp;
@@ -374,7 +381,7 @@ struct SenderFixture {
         nabto_stream_init(&stream, &module, &stamp);
         nabto_stream_init_initiator(&stream);
         nabto_stream_open(&stream, 0);
-        std::vector<uint8_t> synAck = PacketBuilder(NABTO_STREAM_FLAG_SYN | NABTO_STREAM_FLAG_ACK, 42)
+        std::vector<uint8_t> synAck = PacketBuilder(NABTO_STREAM_FLAG_SYN | NABTO_STREAM_FLAG_ACK, peerStamp)
             .ext(NABTO_STREAM_EXTENSION_ACK, ackPayload(0, window, 0))
             .ext(NABTO_STREAM_EXTENSION_SEGMENT_SIZES, segmentSizes(200, 200))
             .ext(NABTO_STREAM_EXTENSION_SYN, 0u)
@@ -446,8 +453,8 @@ struct SenderFixture {
     struct nabto_stream_module module;
     struct nabto_stream stream;
     uint32_t stamp = 0;
-    /** The peer's logical stamp on its last packet; the syn|ack used 42. */
-    uint32_t peerStamp = 42;
+    /** The peer's logical stamp on its last packet, the syn|ack included. */
+    uint32_t peerStamp;
 };
 
 std::vector<uint32_t> seqs(uint32_t from, uint32_t to)
@@ -1106,6 +1113,26 @@ BOOST_AUTO_TEST_CASE(reordered_zero_window_ack_with_equal_max_acked_does_not_clo
     f.ack(4, 4);
     BOOST_TEST(f.unacked().empty());
     BOOST_TEST(f.stream.cCtrl.flightSize == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(syn_ack_window_is_applied_when_the_peer_stamps_start_in_the_upper_half)
+{
+    // The peer starts its logical stamps at 4294967286, which the wrap safe
+    // comparison places before our initial timestampToEcho of 0. The
+    // syn|ack's window advertisement must still be applied: it is the
+    // packet which anchors the stamp, not a reordered one.
+    SenderFixture f(4, 4294967286u);
+    BOOST_TEST(f.stream.maxAdvertisedWindow == 4u);
+    BOOST_TEST(f.stream.timestampToEcho == 4294967286u);
+
+    f.write(4);
+    f.send();
+    BOOST_REQUIRE(f.unacked() == seqs(1, 4));
+
+    f.ack(2, 4);
+    BOOST_TEST(f.peerStamp == 4294967287u);
+    BOOST_TEST(f.stream.maxAdvertisedWindow == 6u);
+    BOOST_TEST(f.unacked() == seqs(3, 4));
 }
 
 BOOST_AUTO_TEST_CASE(window_reduction_keeps_flight_size_in_step_with_unacked)
