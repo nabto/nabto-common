@@ -79,6 +79,8 @@ struct nabto_coap_server_requests {
     size_t maxRequests; // max concurrent requests
     size_t activeRequests;
     size_t maxRequestPayload; // max reassembled request body
+    size_t maxObservers; // max observers across all connections
+    size_t activeObservers;
 
     struct nabto_coap_server_observer* observersSentinel;
 };
@@ -101,6 +103,18 @@ void nabto_coap_server_limit_requests(struct nabto_coap_server_requests* request
  * resource handler. Unlimited by default.
  */
 void nabto_coap_server_limit_request_size(struct nabto_coap_server_requests* requests, size_t limit);
+
+/**
+ * Limit the number of observers on the requests context, counted
+ * across all connections. Observers outlive the request which
+ * registered them, so nabto_coap_server_limit_requests does not bound
+ * them. When the limit is reached
+ * nabto_coap_server_request_accept_observe returns
+ * NABTO_COAP_ERROR_OUT_OF_MEMORY. Re-registering a token already
+ * observing on the same connection replaces that observer and is not
+ * refused by the limit. Unlimited by default.
+ */
+void nabto_coap_server_limit_observers(struct nabto_coap_server_requests* requests, size_t limit);
 
 #define NABTO_COAP_SERVER_LOG_TRACE(fmt, args) do { printf(fmt, args); } while(0);
 
@@ -165,6 +179,11 @@ bool nabto_coap_server_request_is_observe(struct nabto_coap_server_request* requ
  * Accept an observe registration from a request handler.
  * Creates an observer entry that will receive future notifications.
  * Must be called before nabto_coap_server_response_ready().
+ * Returns NABTO_COAP_ERROR_OUT_OF_MEMORY if the observer could not be
+ * allocated or the limit set with nabto_coap_server_limit_observers
+ * has been reached; the handler then answers the request as it sees
+ * fit, e.g. 5.03 Service Unavailable, or as a plain GET without
+ * observe.
  */
 nabto_coap_error nabto_coap_server_request_accept_observe(struct nabto_coap_server_request* request);
 

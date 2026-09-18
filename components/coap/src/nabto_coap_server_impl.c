@@ -47,6 +47,7 @@ nabto_coap_error nabto_coap_server_requests_init(struct nabto_coap_server_reques
     requests->userData = userData;
     requests->maxRequests = SIZE_MAX;
     requests->maxRequestPayload = SIZE_MAX;
+    requests->maxObservers = SIZE_MAX;
 
     // init requests list
     requests->requestsSentinel = server->allocator.calloc(1, sizeof(struct nabto_coap_server_request));
@@ -115,6 +116,11 @@ void nabto_coap_server_limit_requests(struct nabto_coap_server_requests* request
 void nabto_coap_server_limit_request_size(struct nabto_coap_server_requests* requests, size_t limit)
 {
     requests->maxRequestPayload = limit;
+}
+
+void nabto_coap_server_limit_observers(struct nabto_coap_server_requests* requests, size_t limit)
+{
+    requests->maxObservers = limit;
 }
 
 
@@ -913,6 +919,7 @@ void nabto_coap_server_observer_free(struct nabto_coap_server_observer* observer
     struct nabto_coap_server_requests* requests = observer->requests;
     struct nabto_coap_server* server = requests->server;
     nabto_coap_server_observer_remove_from_list(observer);
+    requests->activeObservers--;
 
     // The request which registered the observer may still be alive,
     // retransmitting its initial response or held by the application,
@@ -975,22 +982,32 @@ nabto_coap_error nabto_coap_server_request_accept_observe(struct nabto_coap_serv
     struct nabto_coap_server_requests* requests = request->requests;
     struct nabto_coap_server* server = requests->server;
 
-    // Check if we already have an observer for this token+connection; if so, replace it
-    struct nabto_coap_server_observer* existing = requests->observersSentinel->next;
-    while (existing != requests->observersSentinel) {
-        struct nabto_coap_server_observer* current = existing;
-        existing = existing->next;
-        if (current->connection == request->connection &&
-            nabto_coap_token_equal(&current->token, &request->token))
+    // An observer for this token+connection is replaced. That never
+    // grows the count, so only a fresh registration is held to the
+    // limit, and the old observer is only freed once the new one is
+    // sure to take its place.
+    struct nabto_coap_server_observer* existing = NULL;
+    struct nabto_coap_server_observer* it = requests->observersSentinel->next;
+    while (it != requests->observersSentinel) {
+        if (it->connection == request->connection &&
+            nabto_coap_token_equal(&it->token, &request->token))
         {
-            nabto_coap_server_observer_free(current);
+            existing = it;
             break;
         }
+        it = it->next;
+    }
+
+    if (existing == NULL && requests->activeObservers >= requests->maxObservers) {
+        return NABTO_COAP_ERROR_OUT_OF_MEMORY;
     }
 
     struct nabto_coap_server_observer* observer = server->allocator.calloc(1, sizeof(struct nabto_coap_server_observer));
     if (observer == NULL) {
         return NABTO_COAP_ERROR_OUT_OF_MEMORY;
+    }
+    if (existing) {
+        nabto_coap_server_observer_free(existing);
     }
     observer->requests = requests;
     observer->resource = request->resource;
@@ -1006,6 +1023,7 @@ nabto_coap_error nabto_coap_server_request_accept_observe(struct nabto_coap_serv
     observer->next = after;
     after->prev = observer;
     observer->prev = sentinel;
+    requests->activeObservers++;
 
     request->observer = observer;
     return NABTO_COAP_ERROR_OK;
