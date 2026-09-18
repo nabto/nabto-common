@@ -56,6 +56,19 @@ static bool nabto_coap_server_observer_notification_in_flight(struct nabto_coap_
     return observer->waitingForAck || (observer->sendNow && observer->retransmissions > 0);
 }
 
+/**
+ * A request being received has a deadline for the next Block1 chunk,
+ * armed when it is created and each time a chunk is heard. A client
+ * that starts a Block1 transfer and goes quiet would otherwise hold
+ * the request and its partial body for as long as the connection
+ * lives. Sized like the total retransmission span (ackTimeout doubled
+ * MAX_RETRANSMITS + 1 times), 64 s with the RFC 7252 defaults.
+ */
+static void nabto_coap_server_request_arm_timeout(struct nabto_coap_server_requests* requests, struct nabto_coap_server_request* request)
+{
+    request->timeout = nabto_coap_server_stamp_now(requests) + (requests->server->ackTimeout << (NABTO_COAP_MAX_RETRANSMITS + 1));
+}
+
 
 void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests, void* connection, const uint8_t* packet, size_t packetSize)
 {
@@ -94,8 +107,10 @@ void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests
                     NABTO_COAP_BLOCK_MORE(request->block1Ack))
                 {
                     // An intermediate Block1 chunk was originally answered
-                    // with a piggybacked 2.31 Continue, resend that.
+                    // with a piggybacked 2.31 Continue, resend that. The
+                    // client is still there, so the transfer stays alive.
                     request->hasBlock1Ack = true;
+                    nabto_coap_server_request_arm_timeout(requests, request);
                 } else {
                     nabto_coap_server_queue_ack(requests, connection, msg.messageId);
                 }
@@ -314,6 +329,7 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests
             request->block1Ack += (1 << 3);
             request->hasBlock1Ack = true;
             block1Done = false;
+            nabto_coap_server_request_arm_timeout(requests, request);
         }
     } else {
         if (message->payload && message->payloadLength) {
@@ -421,6 +437,7 @@ struct nabto_coap_server_request* nabto_coap_server_handle_new_request(struct na
     request->token = message->token;
     request->messageId = message->messageId;
     request->resource = resource;
+    nabto_coap_server_request_arm_timeout(requests, request);
 
     // Detect observe registration (GET + Observe=0)
     if (message->hasObserve && message->observe == 0 && message->code == NABTO_COAP_CODE_GET) {

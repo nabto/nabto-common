@@ -81,7 +81,10 @@ bounded with `nabto_coap_server_limit_requests`,
   Entity Incomplete on a gap, 4.00 Bad Request on a chunk of the
   wrong length or the reserved SZX 7, 4.13 Request Entity Too Large
   above `nabto_coap_server_limit_request_size`. The Block1 option is
-  echoed in the first response.
+  echoed in the first response. A transfer on which no chunk has been
+  heard for 64 s (`ACK_TIMEOUT` doubled `MAX_RETRANSMIT` + 1 times) is
+  discarded, as section 2.5 allows; a chunk arriving after that gets
+  4.08.
 - Block2 serving with 512 byte blocks by default and late negotiation
   (the client can ask for smaller blocks). A block past the end of the
   body is a 4.00. The response is kept until the last block has been
@@ -125,7 +128,11 @@ A CoAP exchange has a limited timespan, but a CoAP request/response
 can take as long as the connection is alive. The client therefore
 only bounds the wait for a response with the timeout the caller sets
 on the request (`nabto_coap_client_request_set_timeout`, two minutes
-by default).
+by default). The server likewise puts no deadline on a request the
+application holds; the only server-side deadline on a request is the
+one on a Block1 transfer still being received, where the application
+has not seen the request yet and a silent client would otherwise hold
+a request slot and a partial body for the life of the connection.
 
 ### Why there are no tokens in ACK and RST messages
 
