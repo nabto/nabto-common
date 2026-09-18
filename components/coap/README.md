@@ -81,7 +81,10 @@ bounded with `nabto_coap_server_limit_requests`,
   Entity Incomplete on a gap, 4.00 Bad Request on a chunk of the
   wrong length or the reserved SZX 7, 4.13 Request Entity Too Large
   above `nabto_coap_server_limit_request_size`. The Block1 option is
-  echoed in the first response.
+  echoed in the first response. A transfer on which no chunk has been
+  heard for 64 s (`ACK_TIMEOUT` doubled `MAX_RETRANSMIT` + 1 times) is
+  discarded, as section 2.5 allows; a chunk arriving after that gets
+  4.08.
 - Block2 serving with 512 byte blocks by default and late negotiation
   (the client can ask for smaller blocks). A block past the end of the
   body is a 4.00. The response is kept until the last block has been
@@ -125,7 +128,11 @@ A CoAP exchange has a limited timespan, but a CoAP request/response
 can take as long as the connection is alive. The client therefore
 only bounds the wait for a response with the timeout the caller sets
 on the request (`nabto_coap_client_request_set_timeout`, two minutes
-by default).
+by default). The server likewise puts no deadline on a request the
+application holds; the only server-side deadline on a request is the
+one on a Block1 transfer still being received, where the application
+has not seen the request yet and a silent client would otherwise hold
+a request slot and a partial body for the life of the connection.
 
 ### Why there are no tokens in ACK and RST messages
 
@@ -142,6 +149,28 @@ will not retransmit the request. With separate responses the client
 must ACK the response, so the server only keeps the response state
 until that ACK arrives. The server therefore always sends application
 responses as separate responses.
+
+### The request limit is shared by every connection
+
+`nabto_coap_server_limit_requests` bounds the number of concurrent
+requests in a `nabto_coap_server_requests` context, and one context
+is normally shared by every connection the integrator feeds into it.
+The bound protects the device's memory, it does not give the
+connections a fair share of it: a single client can open requests up
+to the limit and leave them pending, and the server then answers
+5.03 Service Unavailable to every other client until those requests
+finish or the offending connection is removed with
+`nabto_coap_server_remove_connection`.
+
+There is deliberately no per-connection limit in the library. A
+client that is not yet authenticated can open as many connections as
+it likes, so a per-connection limit would only move the problem: the
+client makes many connections with a few requests each and depletes
+the same resources. Fairness between clients has to come from the
+layer that owns the connections, which knows who the peer is and can
+limit connections and requests per identity, and a well-behaved
+resource handler answers or fails requests promptly rather than
+holding them.
 
 ### Route tree
 

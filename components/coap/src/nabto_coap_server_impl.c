@@ -168,8 +168,21 @@ void nabto_coap_server_handle_timeout(struct nabto_coap_server_requests* request
     while(request != requests->requestsSentinel) {
         struct nabto_coap_server_request* current = request;
         request = request->next;
-        // Only responses have a timeout; a request still with the user
-        // has timeout 0 and would otherwise always look expired.
+        // A request still with the user has no deadline; its timeouts
+        // are 0 and would otherwise always look expired.
+        if (current->state == NABTO_COAP_SERVER_REQUEST_STATE_REQUEST &&
+            nabto_coap_is_stamp_less_equal(current->timeout, now))
+        {
+            // A Block1 transfer the client stopped feeding. RFC 7959
+            // section 2.5 lets the server discard the partial state; a
+            // late chunk gets 4.08 Request Entity Incomplete from the
+            // offset check. The user never saw the request, so we free
+            // it for them.
+            current->isFreed = true;
+            current->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
+            nabto_coap_server_free_request(current);
+            continue;
+        }
         if (current->state == NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE &&
             nabto_coap_is_stamp_less_equal(current->response.timeout, now))
         {
@@ -235,8 +248,10 @@ enum nabto_coap_server_next_event nabto_coap_server_next_event(struct nabto_coap
 
     request = requests->requestsSentinel->next;
     while(request != requests->requestsSentinel) {
-        if (request->state == NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE) {
-            // a response has a timeout.
+        if (request->state == NABTO_COAP_SERVER_REQUEST_STATE_REQUEST ||
+            request->state == NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE)
+        {
+            // a request being received and a response both have a timeout.
             return NABTO_COAP_SERVER_NEXT_EVENT_WAIT;
         }
         request = request->next;
@@ -259,12 +274,15 @@ bool nabto_coap_server_get_next_timeout(struct nabto_coap_server_requests* reque
     bool first = true;
     struct nabto_coap_server_request* request = requests->requestsSentinel->next;
     while(request != requests->requestsSentinel) {
-        if (request->state == NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE) {
+        if (request->state == NABTO_COAP_SERVER_REQUEST_STATE_REQUEST ||
+            request->state == NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE)
+        {
+            uint32_t timeout = (request->state == NABTO_COAP_SERVER_REQUEST_STATE_REQUEST) ? request->timeout : request->response.timeout;
             if (first) {
                 first = false;
-                *nextTimeout = request->response.timeout;
+                *nextTimeout = timeout;
             } else {
-                *nextTimeout = nabto_coap_stamp_min(*nextTimeout, request->response.timeout);
+                *nextTimeout = nabto_coap_stamp_min(*nextTimeout, timeout);
             }
         }
         request = request->next;

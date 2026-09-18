@@ -1048,6 +1048,118 @@ BOOST_AUTO_TEST_CASE(request_body_over_the_limit_gets_request_entity_too_large)
     }
 }
 
+// Audit N3 (sc-4860): a request being received had no deadline, so a
+// client that sent the first Block1 chunk with the more bit set and
+// then went quiet held the request, its parameters and the partial body
+// until its connection was removed. The transfer is now discarded when
+// no chunk has been heard for 64 s (RFC 7959 section 2.5 lets the
+// server discard partial state at any time); a late chunk gets 4.08
+// Request Entity Incomplete from the offset check.
+BOOST_AUTO_TEST_CASE(block1_transfer_in_progress_times_out)
+{
+    const uint32_t transferTimeout = NABTO_COAP_ACK_TIMEOUT << (NABTO_COAP_MAX_RETRANSMITS + 1);
+    const std::string chunk(16, 'a');
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xf500, "t1").block1(0, true, 0).payload(chunk).build());
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTINUE);
+    BOOST_TEST(s.requests.activeRequests == 1u);
+
+    // The event loop is told to wait for the deadline.
+    BOOST_TEST(nabto_coap_server_next_event(&s.requests) == NABTO_COAP_SERVER_NEXT_EVENT_WAIT);
+    uint32_t nextTimeout = 0;
+    BOOST_TEST(nabto_coap_server_get_next_timeout(&s.requests, &nextTimeout));
+    BOOST_TEST(nextTimeout == s.now + transferTimeout);
+
+    // Just before the deadline the transfer is kept.
+    s.now += transferTimeout - 1;
+    nabto_coap_server_handle_timeout(&s.requests);
+    BOOST_TEST(s.requests.activeRequests == 1u);
+
+    // At the deadline it is discarded without the handler ever seeing it.
+    s.now += 1;
+    nabto_coap_server_handle_timeout(&s.requests);
+    BOOST_TEST(s.requests.activeRequests == 0u);
+    BOOST_TEST(s.handlerCalls == 0u);
+    BOOST_TEST(s.drain().empty());
+    BOOST_TEST(nabto_coap_server_next_event(&s.requests) == NABTO_COAP_SERVER_NEXT_EVENT_NOTHING);
+    BOOST_TEST(!nabto_coap_server_get_next_timeout(&s.requests, &nextTimeout));
+
+    // A late chunk starts over and is rejected for the gap.
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xf501, "t1").block1(1, true, 0).payload(chunk).build());
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_REQUEST_ENTITY_INCOMPLETE);
+    BOOST_TEST(sent[0].messageId == 0xf501);
+    BOOST_TEST(sent[0].token == "t1");
+    BOOST_TEST(s.handlerCalls == 0u);
+    BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
+// Each chunk heard on a Block1 transfer moves its deadline, a
+// retransmitted chunk included: a client whose 2.31 Continue was lost
+// retransmits the same chunk with back-off for longer than the deadline
+// and must not lose the transfer for it.
+BOOST_AUTO_TEST_CASE(block1_chunk_refreshes_the_transfer_deadline)
+{
+    const uint32_t transferTimeout = NABTO_COAP_ACK_TIMEOUT << (NABTO_COAP_MAX_RETRANSMITS + 1);
+    const std::string chunk(16, 'a');
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xf510, "t1").block1(0, true, 0).payload(chunk).build());
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTINUE);
+
+    // The next chunk arrives well within the deadline and moves it.
+    s.now += transferTimeout / 2;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xf511, "t1").block1(1, true, 0).payload(chunk).build());
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTINUE);
+    BOOST_TEST(sent[0].block1 == blockOption(1, true, 0));
+    uint32_t nextTimeout = 0;
+    BOOST_TEST(nabto_coap_server_get_next_timeout(&s.requests, &nextTimeout));
+    BOOST_TEST(nextTimeout == s.now + transferTimeout);
+
+    // Past the deadline of chunk 0, within that of chunk 1.
+    s.now += transferTimeout / 2 + 1;
+    nabto_coap_server_handle_timeout(&s.requests);
+    BOOST_TEST(s.requests.activeRequests == 1u);
+
+    // A retransmit of chunk 1 gets its 2.31 again and moves the deadline too.
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xf511, "t1").block1(1, true, 0).payload(chunk).build());
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTINUE);
+    BOOST_TEST(sent[0].messageId == 0xf511);
+    BOOST_TEST(nabto_coap_server_get_next_timeout(&s.requests, &nextTimeout));
+    BOOST_TEST(nextTimeout == s.now + transferTimeout);
+    s.now += transferTimeout - 1;
+    nabto_coap_server_handle_timeout(&s.requests);
+    BOOST_TEST(s.requests.activeRequests == 1u);
+
+    // The last chunk completes the transfer, which then has no deadline
+    // while the handler holds it.
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xf512, "t1").block1(2, false, 0).payload(chunk).build());
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_EMPTY);
+    BOOST_REQUIRE(s.handlerCalls == 1u);
+    void* payload;
+    size_t payloadLength;
+    BOOST_TEST(nabto_coap_server_request_get_payload(s.request, &payload, &payloadLength));
+    BOOST_TEST(payloadLength == 48u);
+    s.now += 2 * transferTimeout;
+    nabto_coap_server_handle_timeout(&s.requests);
+    BOOST_TEST(s.requests.activeRequests == 1u);
+    BOOST_TEST(nabto_coap_server_next_event(&s.requests) == NABTO_COAP_SERVER_NEXT_EVENT_NOTHING);
+
+    s.respondAndFinish(NABTO_COAP_CODE_CHANGED);
+}
+
 // Audit H2 (sc-4812): an observer's message id is 0 until the first
 // notification, and a RST used to be matched against it regardless, so
 // a RST with message id 0 freed a freshly registered observer while the
