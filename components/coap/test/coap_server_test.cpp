@@ -1200,4 +1200,62 @@ BOOST_AUTO_TEST_CASE(delayed_ack_or_rst_matches_queued_notification_retransmit)
     }
 }
 
+// Audit N2 (sc-4859): observers outlive their request, so they have a
+// limit of their own. At the limit a fresh registration is refused and
+// the request is answered as a plain GET; re-registering a token that
+// is already observing replaces its observer and is not refused; once
+// an observer is gone a new registration is accepted again.
+BOOST_AUTO_TEST_CASE(observer_limit_refuses_registration_until_one_is_removed)
+{
+    TestServer s;
+    nabto_coap_server_limit_observers(&s.requests, 2);
+    s.registerObserver("t1", 0x1401);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.registerObserver("t2", 0x1402);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    BOOST_TEST(s.observerCount() == 2u);
+    BOOST_TEST(s.requests.activeObservers == 2u);
+
+    // Third token: refused, the count stays at 2 and the response
+    // carries no Observe option.
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x1403, "t3", "test", 0).build());
+    BOOST_TEST(s.drain().size() == 1u); // empty ACK
+    BOOST_REQUIRE(s.request != NULL);
+    BOOST_TEST(nabto_coap_server_request_accept_observe(s.request) == NABTO_COAP_ERROR_OUT_OF_MEMORY);
+    BOOST_TEST(nabto_coap_server_request_get_observer(s.request) == (struct nabto_coap_server_observer*)NULL);
+    BOOST_TEST(s.observerCount() == 2u);
+    BOOST_TEST(s.requests.activeObservers == 2u);
+    nabto_coap_server_response_set_code(s.request, NABTO_COAP_CODE_SERVICE_UNAVAILABLE);
+    BOOST_REQUIRE(nabto_coap_server_response_ready(s.request) == NABTO_COAP_ERROR_OK);
+    nabto_coap_server_request_free(s.request);
+    s.request = NULL;
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_SERVICE_UNAVAILABLE);
+    BOOST_TEST(sent[0].token == "t3");
+    BOOST_TEST(!sent[0].hasObserve);
+    s.handlePacket(ackPacket(sent[0].messageId));
+
+    // t1 again: a replacement, accepted at the limit.
+    s.registerObserver("t1", 0x1404);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    BOOST_TEST(s.observerCount() == 2u);
+    BOOST_TEST(s.requests.activeObservers == 2u);
+
+    // Deregister t2, then t3 fits.
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x1405, "t2", "test", 1).build());
+    BOOST_TEST(s.drain().size() == 1u); // empty ACK
+    BOOST_TEST(s.observerCount() == 1u);
+    BOOST_TEST(s.requests.activeObservers == 1u);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.registerObserver("t3", 0x1406);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    BOOST_TEST(s.observerCount() == 2u);
+    BOOST_TEST(s.requests.activeObservers == 2u);
+    BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
 BOOST_AUTO_TEST_SUITE_END()

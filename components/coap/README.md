@@ -22,9 +22,11 @@ Both client and server are driven by the integrator's event loop:
 say whether there is a packet to send, a timeout to wait for
 (`*_get_next_timeout`) or nothing to do, and the `notifyEvent`
 callback asks the integrator to run the loop again. Memory comes from
-an `nn_allocator`. There are no static limits, but reassembly can be
-bounded with `nabto_coap_server_limit_requests`,
-`nabto_coap_server_limit_request_size` and
+an `nn_allocator`. There are no static limits, but requests, request
+bodies, observers and response bodies can be bounded with
+`nabto_coap_server_limit_requests`,
+`nabto_coap_server_limit_request_size`,
+`nabto_coap_server_limit_observers` and
 `nabto_coap_client_limit_response_size`.
 
 ## RFC 7252, CoAP core
@@ -112,7 +114,12 @@ bounded with `nabto_coap_server_limit_requests`,
   retransmission; an update arriving while one is in flight is kept
   in a single pending slot and sent when the in-flight one is ACKed.
   An observer is removed on a RST, when retransmissions are exhausted,
-  on deregistration and when its connection is removed.
+  on deregistration and when its connection is removed. Observers
+  outlive the request which registered them, so they have their own
+  bound: above `nabto_coap_server_limit_observers`
+  `nabto_coap_server_request_accept_observe` fails and the handler
+  answers with 5.03 Service Unavailable, or serves the request as a
+  plain GET.
 - Missing: NON notifications (no API to select them), Max-Age and ETag
   on notifications, cancelling an observation from the server with an
   error response.
