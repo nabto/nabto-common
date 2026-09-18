@@ -673,8 +673,11 @@ void nabto_stream_handle_syn(struct nabto_stream* stream, struct nabto_stream_he
     if (stream->state == ST_IDLE) {
         SET_STATE(stream, ST_ACCEPT);
         stream->contentType = req->contentType;
-        stream->maxSendSegmentSize = NABTO_STREAM_MIN(stream->maxSendSegmentSize, req->maxSendSegmentSize);
-        stream->maxSendSegmentSize = NABTO_STREAM_MIN(stream->maxRecvSegmentSize, req->maxRecvSegmentSize);
+        // what we send has to fit the peer's recv segments and what we
+        // receive has to fit our own; the recv size must be settled before
+        // the first recv segment is allocated from it.
+        stream->maxSendSegmentSize = NABTO_STREAM_MIN(stream->maxSendSegmentSize, req->maxRecvSegmentSize);
+        stream->maxRecvSegmentSize = NABTO_STREAM_MIN(stream->maxRecvSegmentSize, req->maxSendSegmentSize);
 
         stream->recvMax = req->seq;
         stream->recvMaxAllocated = req->seq;
@@ -711,8 +714,11 @@ void nabto_stream_handle_syn_ack(struct nabto_stream* stream, struct nabto_strea
     if (stream->state == ST_SYN_SENT) {
         // answer on our syn
         SET_STATE(stream, ST_ESTABLISHED);
-        stream->maxSendSegmentSize = NABTO_STREAM_MIN(stream->maxSendSegmentSize, req->maxSendSegmentSize);
-        stream->maxSendSegmentSize = NABTO_STREAM_MIN(stream->maxRecvSegmentSize, req->maxRecvSegmentSize);
+        // what we send has to fit the peer's recv segments and what we
+        // receive has to fit our own; the recv size must be settled before
+        // the first recv segment is allocated from it.
+        stream->maxSendSegmentSize = NABTO_STREAM_MIN(stream->maxSendSegmentSize, req->maxRecvSegmentSize);
+        stream->maxRecvSegmentSize = NABTO_STREAM_MIN(stream->maxRecvSegmentSize, req->maxSendSegmentSize);
         stream->imediateAck = true;
         // syn | ack packet has sequence 0
         stream->recvMax = req->seq;
