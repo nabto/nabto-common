@@ -286,8 +286,11 @@ void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr,
         return;
     }
 
-    nabto_stream_parse_acking(stream, begin, end, hdr);
+    // handle_syn_ack anchors timestampToEcho at the peer's first stamp;
+    // parse_ack_extension gates the window advertisement on it, so that
+    // must be in place before the syn|ack's own ack extension is applied.
     nabto_stream_handle_syn_ack(stream, hdr, &req);
+    nabto_stream_parse_acking(stream, begin, end, hdr);
 }
 
 /**
