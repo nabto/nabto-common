@@ -56,6 +56,35 @@ static bool nabto_coap_server_observer_notification_in_flight(struct nabto_coap_
     return observer->waitingForAck || (observer->sendNow && observer->retransmissions > 0);
 }
 
+/**
+ * A response with the request's current message id has been sent and
+ * not yet acknowledged: the request is in RESPONSE state and the
+ * response is waiting for its ACK, or timed out and is queued for
+ * retransmission. Only such a response is matched by an ACK or RST
+ * (RFC 7252 section 4.2). The id is assigned when the request is
+ * created, so a request still being received, or with the application,
+ * has an id the client has never seen but can guess; matching it would
+ * end the request before the application ever owned it.
+ */
+static bool nabto_coap_server_response_in_flight(struct nabto_coap_server_request* request)
+{
+    return request->state == NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE &&
+        (!request->response.sendNow || request->response.retransmissions > 0);
+}
+
+/**
+ * A request being received has a deadline for the next Block1 chunk,
+ * armed when it is created and each time a chunk is heard. A client
+ * that starts a Block1 transfer and goes quiet would otherwise hold
+ * the request and its partial body for as long as the connection
+ * lives. Sized like the total retransmission span (ackTimeout doubled
+ * MAX_RETRANSMITS + 1 times), 64 s with the RFC 7252 defaults.
+ */
+static void nabto_coap_server_request_arm_timeout(struct nabto_coap_server_requests* requests, struct nabto_coap_server_request* request)
+{
+    request->timeout = nabto_coap_server_stamp_now(requests) + (requests->server->ackTimeout << (NABTO_COAP_MAX_RETRANSMITS + 1));
+}
+
 
 void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests, void* connection, const uint8_t* packet, size_t packetSize)
 {
@@ -94,8 +123,10 @@ void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests
                     NABTO_COAP_BLOCK_MORE(request->block1Ack))
                 {
                     // An intermediate Block1 chunk was originally answered
-                    // with a piggybacked 2.31 Continue, resend that.
+                    // with a piggybacked 2.31 Continue, resend that. The
+                    // client is still there, so the transfer stays alive.
                     request->hasBlock1Ack = true;
+                    nabto_coap_server_request_arm_timeout(requests, request);
                 } else {
                     nabto_coap_server_queue_ack(requests, connection, msg.messageId);
                 }
@@ -314,6 +345,7 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests
             request->block1Ack += (1 << 3);
             request->hasBlock1Ack = true;
             block1Done = false;
+            nabto_coap_server_request_arm_timeout(requests, request);
         }
     } else {
         if (message->payload && message->payloadLength) {
@@ -430,6 +462,7 @@ struct nabto_coap_server_request* nabto_coap_server_handle_new_request(struct na
     request->token = message->token;
     request->messageId = message->messageId;
     request->resource = resource;
+    nabto_coap_server_request_arm_timeout(requests, request);
 
     // Detect observe registration (GET + Observe=0)
     if (message->hasObserve && message->observe == 0 && message->code == NABTO_COAP_CODE_GET) {
@@ -491,12 +524,13 @@ void nabto_coap_server_handle_rst(struct nabto_coap_server_requests* requests, u
 {
     struct nabto_coap_server_request* request = requests->requestsSentinel->next;
     while(request != requests->requestsSentinel) {
-        if (request->connection == connection) {
-            if (request->response.messageId == messageId) {
-                request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
-                nabto_coap_server_free_request(request);
-                return;
-            }
+        if (nabto_coap_server_response_in_flight(request) &&
+            request->connection == connection &&
+            request->response.messageId == messageId)
+        {
+            request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
+            nabto_coap_server_free_request(request);
+            return;
         }
         request = request->next;
     }
@@ -531,8 +565,9 @@ struct nabto_coap_server_response* nabto_coap_server_find_response(struct nabto_
 {
     struct nabto_coap_server_request* request = requests->requestsSentinel->next;
     while(request != requests->requestsSentinel) {
-        if(request->connection == connection &&
-           request->response.messageId == messageId)
+        if (nabto_coap_server_response_in_flight(request) &&
+            request->connection == connection &&
+            request->response.messageId == messageId)
         {
             return &request->response;
         }

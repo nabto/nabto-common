@@ -101,6 +101,11 @@ struct nabto_coap_server_request {
     bool hasBlock1Ack;
     uint32_t block1Ack;
 
+    // Deadline for the next Block1 chunk while the request is being
+    // received (REQUEST state); the transfer is discarded when it
+    // passes. Not used in the other states.
+    uint32_t timeout;
+
     bool handled;
     bool isFreed;
     bool isObserveRegister;

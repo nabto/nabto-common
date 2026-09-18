@@ -1082,6 +1082,118 @@ BOOST_AUTO_TEST_CASE(request_body_over_the_limit_gets_request_entity_too_large)
     }
 }
 
+// Audit N3 (sc-4860): a request being received had no deadline, so a
+// client that sent the first Block1 chunk with the more bit set and
+// then went quiet held the request, its parameters and the partial body
+// until its connection was removed. The transfer is now discarded when
+// no chunk has been heard for 64 s (RFC 7959 section 2.5 lets the
+// server discard partial state at any time); a late chunk gets 4.08
+// Request Entity Incomplete from the offset check.
+BOOST_AUTO_TEST_CASE(block1_transfer_in_progress_times_out)
+{
+    const uint32_t transferTimeout = NABTO_COAP_ACK_TIMEOUT << (NABTO_COAP_MAX_RETRANSMITS + 1);
+    const std::string chunk(16, 'a');
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xf500, "t1").block1(0, true, 0).payload(chunk).build());
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTINUE);
+    BOOST_TEST(s.requests.activeRequests == 1u);
+
+    // The event loop is told to wait for the deadline.
+    BOOST_TEST(nabto_coap_server_next_event(&s.requests) == NABTO_COAP_SERVER_NEXT_EVENT_WAIT);
+    uint32_t nextTimeout = 0;
+    BOOST_TEST(nabto_coap_server_get_next_timeout(&s.requests, &nextTimeout));
+    BOOST_TEST(nextTimeout == s.now + transferTimeout);
+
+    // Just before the deadline the transfer is kept.
+    s.now += transferTimeout - 1;
+    nabto_coap_server_handle_timeout(&s.requests);
+    BOOST_TEST(s.requests.activeRequests == 1u);
+
+    // At the deadline it is discarded without the handler ever seeing it.
+    s.now += 1;
+    nabto_coap_server_handle_timeout(&s.requests);
+    BOOST_TEST(s.requests.activeRequests == 0u);
+    BOOST_TEST(s.handlerCalls == 0u);
+    BOOST_TEST(s.drain().empty());
+    BOOST_TEST(nabto_coap_server_next_event(&s.requests) == NABTO_COAP_SERVER_NEXT_EVENT_NOTHING);
+    BOOST_TEST(!nabto_coap_server_get_next_timeout(&s.requests, &nextTimeout));
+
+    // A late chunk starts over and is rejected for the gap.
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xf501, "t1").block1(1, true, 0).payload(chunk).build());
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_REQUEST_ENTITY_INCOMPLETE);
+    BOOST_TEST(sent[0].messageId == 0xf501);
+    BOOST_TEST(sent[0].token == "t1");
+    BOOST_TEST(s.handlerCalls == 0u);
+    BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
+// Each chunk heard on a Block1 transfer moves its deadline, a
+// retransmitted chunk included: a client whose 2.31 Continue was lost
+// retransmits the same chunk with back-off for longer than the deadline
+// and must not lose the transfer for it.
+BOOST_AUTO_TEST_CASE(block1_chunk_refreshes_the_transfer_deadline)
+{
+    const uint32_t transferTimeout = NABTO_COAP_ACK_TIMEOUT << (NABTO_COAP_MAX_RETRANSMITS + 1);
+    const std::string chunk(16, 'a');
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xf510, "t1").block1(0, true, 0).payload(chunk).build());
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTINUE);
+
+    // The next chunk arrives well within the deadline and moves it.
+    s.now += transferTimeout / 2;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xf511, "t1").block1(1, true, 0).payload(chunk).build());
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTINUE);
+    BOOST_TEST(sent[0].block1 == blockOption(1, true, 0));
+    uint32_t nextTimeout = 0;
+    BOOST_TEST(nabto_coap_server_get_next_timeout(&s.requests, &nextTimeout));
+    BOOST_TEST(nextTimeout == s.now + transferTimeout);
+
+    // Past the deadline of chunk 0, within that of chunk 1.
+    s.now += transferTimeout / 2 + 1;
+    nabto_coap_server_handle_timeout(&s.requests);
+    BOOST_TEST(s.requests.activeRequests == 1u);
+
+    // A retransmit of chunk 1 gets its 2.31 again and moves the deadline too.
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xf511, "t1").block1(1, true, 0).payload(chunk).build());
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTINUE);
+    BOOST_TEST(sent[0].messageId == 0xf511);
+    BOOST_TEST(nabto_coap_server_get_next_timeout(&s.requests, &nextTimeout));
+    BOOST_TEST(nextTimeout == s.now + transferTimeout);
+    s.now += transferTimeout - 1;
+    nabto_coap_server_handle_timeout(&s.requests);
+    BOOST_TEST(s.requests.activeRequests == 1u);
+
+    // The last chunk completes the transfer, which then has no deadline
+    // while the handler holds it.
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xf512, "t1").block1(2, false, 0).payload(chunk).build());
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_EMPTY);
+    BOOST_REQUIRE(s.handlerCalls == 1u);
+    void* payload;
+    size_t payloadLength;
+    BOOST_TEST(nabto_coap_server_request_get_payload(s.request, &payload, &payloadLength));
+    BOOST_TEST(payloadLength == 48u);
+    s.now += 2 * transferTimeout;
+    nabto_coap_server_handle_timeout(&s.requests);
+    BOOST_TEST(s.requests.activeRequests == 1u);
+    BOOST_TEST(nabto_coap_server_next_event(&s.requests) == NABTO_COAP_SERVER_NEXT_EVENT_NOTHING);
+
+    s.respondAndFinish(NABTO_COAP_CODE_CHANGED);
+}
+
 // Audit H2 (sc-4812): an observer's message id is 0 until the first
 // notification, and a RST used to be matched against it regardless, so
 // a RST with message id 0 freed a freshly registered observer while the
@@ -1232,6 +1344,150 @@ BOOST_AUTO_TEST_CASE(delayed_ack_or_rst_matches_queued_notification_retransmit)
         }
         BOOST_TEST(s.drain().empty());
     }
+}
+
+// Audit N2 (sc-4859): observers outlive their request, so they have a
+// limit of their own. At the limit a fresh registration is refused and
+// the request is answered as a plain GET; re-registering a token that
+// is already observing replaces its observer and is not refused, even
+// when the limit has been lowered below the count; once an observer is
+// gone a new registration is accepted again.
+BOOST_AUTO_TEST_CASE(observer_limit_refuses_registration_until_one_is_removed)
+{
+    TestServer s;
+    nabto_coap_server_limit_observers(&s.requests, 2);
+    s.registerObserver("t1", 0x1401);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.registerObserver("t2", 0x1402);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    BOOST_TEST(s.observerCount() == 2u);
+    BOOST_TEST(s.requests.activeObservers == 2u);
+
+    // Third token: refused, the count stays at 2 and the response
+    // carries no Observe option.
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x1403, "t3", "test", 0).build());
+    BOOST_TEST(s.drain().size() == 1u); // empty ACK
+    BOOST_REQUIRE(s.request != NULL);
+    BOOST_TEST(nabto_coap_server_request_accept_observe(s.request) == NABTO_COAP_ERROR_OUT_OF_MEMORY);
+    BOOST_TEST(nabto_coap_server_request_get_observer(s.request) == (struct nabto_coap_server_observer*)NULL);
+    BOOST_TEST(s.observerCount() == 2u);
+    BOOST_TEST(s.requests.activeObservers == 2u);
+    nabto_coap_server_response_set_code(s.request, NABTO_COAP_CODE_SERVICE_UNAVAILABLE);
+    BOOST_REQUIRE(nabto_coap_server_response_ready(s.request) == NABTO_COAP_ERROR_OK);
+    nabto_coap_server_request_free(s.request);
+    s.request = NULL;
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_SERVICE_UNAVAILABLE);
+    BOOST_TEST(sent[0].token == "t3");
+    BOOST_TEST(!sent[0].hasObserve);
+    s.handlePacket(ackPacket(sent[0].messageId));
+
+    // t1 again: a replacement, accepted at the limit.
+    s.registerObserver("t1", 0x1404);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    BOOST_TEST(s.observerCount() == 2u);
+    BOOST_TEST(s.requests.activeObservers == 2u);
+
+    // Deregister t2, then t3 fits.
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x1405, "t2", "test", 1).build());
+    BOOST_TEST(s.drain().size() == 1u); // empty ACK
+    BOOST_TEST(s.observerCount() == 1u);
+    BOOST_TEST(s.requests.activeObservers == 1u);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.registerObserver("t3", 0x1406);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    BOOST_TEST(s.observerCount() == 2u);
+    BOOST_TEST(s.requests.activeObservers == 2u);
+
+    // The limit lowered below the count: t1 is still replaced, t4 is
+    // refused.
+    nabto_coap_server_limit_observers(&s.requests, 1);
+    s.registerObserver("t1", 0x1407);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    BOOST_TEST(s.observerCount() == 2u);
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x1408, "t4", "test", 0).build());
+    BOOST_TEST(s.drain().size() == 1u); // empty ACK
+    BOOST_REQUIRE(s.request != NULL);
+    BOOST_TEST(nabto_coap_server_request_accept_observe(s.request) == NABTO_COAP_ERROR_OUT_OF_MEMORY);
+    BOOST_TEST(s.observerCount() == 2u);
+    BOOST_TEST(s.requests.activeObservers == 2u);
+    s.respond(s.request, NABTO_COAP_CODE_SERVICE_UNAVAILABLE);
+    s.request = NULL;
+    BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
+// Audit N1 (sc-4858): a request gets its response message id when it
+// is created, before anything is sent, and an ACK or RST used to be
+// matched against it in every state. For a request still being
+// received it set the state to DONE without the user ever owning it,
+// so nothing freed it: the request, its body and its maxRequests slot
+// were pinned until reboot, and further chunks were dropped. Ids are
+// sequential, so a client can guess the next one. An ACK or RST only
+// matches a response in flight; the transfer completes as usual.
+BOOST_AUTO_TEST_CASE(rst_or_ack_for_unsent_response_id_keeps_block1_request)
+{
+    for (int rst = 0; rst <= 1; rst++) {
+        TestServer s;
+        const std::string chunk0(16, 'a');
+        const std::string chunk1(16, 'b');
+        uint16_t messageId = (uint16_t)(0xb100 + 2 * rst);
+
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, messageId, "t1").block1(0, true, 0).payload(chunk0).build());
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTINUE);
+        BOOST_TEST(s.handlerCalls == 0u);
+        BOOST_TEST(s.requests.activeRequests == 1u);
+
+        uint16_t responseId = s.requests.requestsSentinel->next->response.messageId;
+        s.handlePacket(rst ? rstPacket(responseId) : ackPacket(responseId));
+        BOOST_TEST(s.drain().empty());
+        BOOST_TEST(s.requests.activeRequests == 1u);
+
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, (uint16_t)(messageId + 1), "t1").block1(1, false, 0).payload(chunk1).build());
+        sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+        BOOST_TEST(sent[0].code == NABTO_COAP_CODE_EMPTY);
+        BOOST_REQUIRE(s.handlerCalls == 1u);
+        void* payload;
+        size_t payloadLength;
+        BOOST_TEST(nabto_coap_server_request_get_payload(s.request, &payload, &payloadLength));
+        BOOST_TEST(std::string((const char*)payload, payloadLength) == chunk0 + chunk1);
+
+        s.respondAndFinish(NABTO_COAP_CODE_CHANGED);
+    }
+}
+
+// A response that is ready but not yet sent has an id the client has
+// not seen either; an ACK with it matches nothing and the response is
+// sent as usual.
+BOOST_AUTO_TEST_CASE(ack_for_unsent_response_is_ignored)
+{
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xb200, "t1").build());
+    BOOST_TEST(s.drain().size() == 1u); // empty ACK
+    BOOST_REQUIRE(s.request != NULL);
+    uint16_t responseId = s.request->response.messageId;
+    s.respondNoAck(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+
+    s.handlePacket(ackPacket(responseId));
+    BOOST_TEST(s.requests.activeRequests == 1u);
+
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_CON);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTENT);
+    BOOST_TEST(sent[0].messageId == responseId);
+
+    s.handlePacket(ackPacket(responseId));
+    BOOST_TEST(s.requests.activeRequests == 0u);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
