@@ -56,6 +56,22 @@ static bool nabto_coap_server_observer_notification_in_flight(struct nabto_coap_
     return observer->waitingForAck || (observer->sendNow && observer->retransmissions > 0);
 }
 
+/**
+ * A response with the request's current message id has been sent and
+ * not yet acknowledged: the request is in RESPONSE state and the
+ * response is waiting for its ACK, or timed out and is queued for
+ * retransmission. Only such a response is matched by an ACK or RST
+ * (RFC 7252 section 4.2). The id is assigned when the request is
+ * created, so a request still being received, or with the application,
+ * has an id the client has never seen but can guess; matching it would
+ * end the request before the application ever owned it.
+ */
+static bool nabto_coap_server_response_in_flight(struct nabto_coap_server_request* request)
+{
+    return request->state == NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE &&
+        (!request->response.sendNow || request->response.retransmissions > 0);
+}
+
 
 void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests, void* connection, const uint8_t* packet, size_t packetSize)
 {
@@ -482,12 +498,13 @@ void nabto_coap_server_handle_rst(struct nabto_coap_server_requests* requests, u
 {
     struct nabto_coap_server_request* request = requests->requestsSentinel->next;
     while(request != requests->requestsSentinel) {
-        if (request->connection == connection) {
-            if (request->response.messageId == messageId) {
-                request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
-                nabto_coap_server_free_request(request);
-                return;
-            }
+        if (nabto_coap_server_response_in_flight(request) &&
+            request->connection == connection &&
+            request->response.messageId == messageId)
+        {
+            request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
+            nabto_coap_server_free_request(request);
+            return;
         }
         request = request->next;
     }
@@ -522,8 +539,9 @@ struct nabto_coap_server_response* nabto_coap_server_find_response(struct nabto_
 {
     struct nabto_coap_server_request* request = requests->requestsSentinel->next;
     while(request != requests->requestsSentinel) {
-        if(request->connection == connection &&
-           request->response.messageId == messageId)
+        if (nabto_coap_server_response_in_flight(request) &&
+            request->connection == connection &&
+            request->response.messageId == messageId)
         {
             return &request->response;
         }
