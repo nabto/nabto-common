@@ -1203,8 +1203,9 @@ BOOST_AUTO_TEST_CASE(delayed_ack_or_rst_matches_queued_notification_retransmit)
 // Audit N2 (sc-4859): observers outlive their request, so they have a
 // limit of their own. At the limit a fresh registration is refused and
 // the request is answered as a plain GET; re-registering a token that
-// is already observing replaces its observer and is not refused; once
-// an observer is gone a new registration is accepted again.
+// is already observing replaces its observer and is not refused, even
+// when the limit has been lowered below the count; once an observer is
+// gone a new registration is accepted again.
 BOOST_AUTO_TEST_CASE(observer_limit_refuses_registration_until_one_is_removed)
 {
     TestServer s;
@@ -1255,6 +1256,22 @@ BOOST_AUTO_TEST_CASE(observer_limit_refuses_registration_until_one_is_removed)
     s.request = NULL;
     BOOST_TEST(s.observerCount() == 2u);
     BOOST_TEST(s.requests.activeObservers == 2u);
+
+    // The limit lowered below the count: t1 is still replaced, t4 is
+    // refused.
+    nabto_coap_server_limit_observers(&s.requests, 1);
+    s.registerObserver("t1", 0x1407);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    BOOST_TEST(s.observerCount() == 2u);
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x1408, "t4", "test", 0).build());
+    BOOST_TEST(s.drain().size() == 1u); // empty ACK
+    BOOST_REQUIRE(s.request != NULL);
+    BOOST_TEST(nabto_coap_server_request_accept_observe(s.request) == NABTO_COAP_ERROR_OUT_OF_MEMORY);
+    BOOST_TEST(s.observerCount() == 2u);
+    BOOST_TEST(s.requests.activeObservers == 2u);
+    s.respond(s.request, NABTO_COAP_CODE_SERVICE_UNAVAILABLE);
+    s.request = NULL;
     BOOST_TEST(s.requests.activeRequests == 0u);
 }
 

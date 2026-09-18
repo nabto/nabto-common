@@ -964,9 +964,10 @@ nabto_coap_error nabto_coap_server_request_accept_observe(struct nabto_coap_serv
     struct nabto_coap_server_requests* requests = request->requests;
     struct nabto_coap_server* server = requests->server;
 
-    // An observer for this token+connection is replaced, so it does
-    // not count against the limit. It is only freed once the new one
-    // is sure to take its place.
+    // An observer for this token+connection is replaced. That never
+    // grows the count, so only a fresh registration is held to the
+    // limit, and the old observer is only freed once the new one is
+    // sure to take its place.
     struct nabto_coap_server_observer* existing = NULL;
     struct nabto_coap_server_observer* it = requests->observersSentinel->next;
     while (it != requests->observersSentinel) {
@@ -979,7 +980,7 @@ nabto_coap_error nabto_coap_server_request_accept_observe(struct nabto_coap_serv
         it = it->next;
     }
 
-    if (requests->activeObservers - (existing ? 1 : 0) >= requests->maxObservers) {
+    if (existing == NULL && requests->activeObservers >= requests->maxObservers) {
         return NABTO_COAP_ERROR_OUT_OF_MEMORY;
     }
 
