@@ -157,11 +157,13 @@ must ACK the response, so the server only keeps the response state
 until that ACK arrives. The server therefore always sends application
 responses as separate responses.
 
-### The request limit is shared by every connection
+### The request and observer limits are shared by every connection
 
 `nabto_coap_server_limit_requests` bounds the number of concurrent
 requests in a `nabto_coap_server_requests` context, and one context
-is normally shared by every connection the integrator feeds into it.
+is normally shared by every connection the integrator feeds into it;
+`nabto_coap_server_limit_observers` bounds the observers of the
+context the same way.
 The bound protects the device's memory, it does not give the
 connections a fair share of it: a single client can open requests up
 to the limit and leave them pending, and the server then answers
