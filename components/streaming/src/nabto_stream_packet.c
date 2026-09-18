@@ -339,7 +339,6 @@ void nabto_stream_parse_acking(struct nabto_stream* stream, const uint8_t* ptr, 
 
 void nabto_stream_parse_ack_extension(struct nabto_stream* stream, const uint8_t* ptr, uint16_t length, struct nabto_stream_header* hdr)
 {
-    (void)hdr;
     const uint8_t* end = ptr + length;
 
     uint32_t maxAcked;
@@ -366,12 +365,10 @@ void nabto_stream_parse_ack_extension(struct nabto_stream* stream, const uint8_t
         return;
     }
 
-    // An ack is stale when it carries a lower maxAcked than one already seen.
-    // A reordered stale ack must not shrink the advertised window; an ack
-    // with the same maxAcked is applied since the window may have opened.
-    if (nabto_stream_sequence_less_equal(stream->maxAcked, maxAcked)) {
-        stream->maxAcked = maxAcked;
-
+    // handle_packet has already advanced timestampToEcho to the newest peer
+    // stamp, so a packet with an older stamp is a reordered one whose window
+    // advertisement has been superseded and must not shrink the window.
+    if (nabto_stream_logical_stamp_less_or_equal(stream->timestampToEcho, hdr->timestampValue)) {
         uint32_t oldAdvertisedWindow = stream->maxAdvertisedWindow;
         stream->maxAdvertisedWindow = maxAcked + windowSize;
 

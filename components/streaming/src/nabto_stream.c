@@ -41,7 +41,6 @@ nabto_stream_status nabto_stream_open(struct nabto_stream* stream, uint32_t cont
 
     stream->timeoutStamp = nabto_stream_stamp_now();
     stream->xmitMaxAllocated = stream->startSequenceNumber;
-    stream->maxAcked = stream->startSequenceNumber - 1;
     stream->contentType = contentType;
     nabto_stream_module_notify_event(stream, NABTO_STREAM_MODULE_EVENT_OPENED);
     return NABTO_STREAM_STATUS_OK;
@@ -57,7 +56,6 @@ nabto_stream_status nabto_stream_accept(struct nabto_stream* stream)
     }
 
     stream->xmitMaxAllocated = stream->startSequenceNumber;
-    stream->maxAcked = stream->startSequenceNumber - 1;
     nabto_stream_allocate_next_send_segment(stream);
     nabto_stream_allocate_next_recv_segment(stream);
 
