@@ -18,6 +18,10 @@ void nabto_stream_flow_control_advertised_window_reduced(struct nabto_stream* st
 
         nabto_stream_remove_segment_from_resend_list(segment);
 
+        // the segment leaves the flight; it is counted again when it is
+        // sent from the send list.
+        stream->cCtrl.flightSize -= 1;
+
         nabto_stream_add_segment_to_send_list_before_elm(stream, stream->sendList->nextSend, segment);
     }
 }
