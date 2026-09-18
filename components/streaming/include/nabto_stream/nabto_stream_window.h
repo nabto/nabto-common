@@ -365,7 +365,6 @@ struct nabto_stream {
     // allocate a send segment;
     nabto_stream_stamp                sendSegmentAllocationStamp;
 
-    uint32_t                        maxAcked;               /**< max acked sequence number, not cumulative acked.*/
     uint32_t                        xmitMaxAllocated;       /**< max allocated seq of xmit buffers */
 
     // next segment to receive data from, from the application. the

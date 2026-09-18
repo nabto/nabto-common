@@ -407,10 +407,19 @@ struct SenderFixture {
         BOOST_REQUIRE(nabto_stream_create_packet(&stream, buf.data(), buf.size(), ET_DATA) > 0u);
     }
 
-    /** Deliver an ack with no gap blocks: everything up to maxAcked is acked. */
+    /**
+     * Deliver an ack with no gap blocks: everything up to maxAcked is acked.
+     * Each ack carries the next peer stamp, as a peer sends them in order;
+     * pass an older stamp to deliver an ack the network held back.
+     */
     void ack(uint32_t maxAcked, uint32_t window)
     {
-        std::vector<uint8_t> packet = PacketBuilder(NABTO_STREAM_FLAG_ACK, 42)
+        ack(maxAcked, window, ++peerStamp);
+    }
+
+    void ack(uint32_t maxAcked, uint32_t window, uint32_t stamp)
+    {
+        std::vector<uint8_t> packet = PacketBuilder(NABTO_STREAM_FLAG_ACK, stamp)
             .ext(NABTO_STREAM_EXTENSION_ACK, ackPayload(maxAcked, window, 0))
             .build();
         handle(&stream, packet);
@@ -437,6 +446,8 @@ struct SenderFixture {
     struct nabto_stream_module module;
     struct nabto_stream stream;
     uint32_t stamp = 0;
+    /** The peer's logical stamp on its last packet; the syn|ack used 42. */
+    uint32_t peerStamp = 42;
 };
 
 std::vector<uint32_t> seqs(uint32_t from, uint32_t to)
@@ -1037,13 +1048,11 @@ BOOST_AUTO_TEST_CASE(reordered_stale_ack_does_not_reduce_the_window)
     BOOST_REQUIRE(f.stream.cCtrl.flightSize == 4u);
 
     f.ack(2, 4);
-    BOOST_TEST(f.stream.maxAcked == 2u);
     BOOST_TEST(f.stream.maxAdvertisedWindow == 6u);
     BOOST_TEST(f.unacked() == seqs(3, 4));
     BOOST_TEST(f.stream.cCtrl.flightSize == 2u);
 
-    f.ack(1, 0);
-    BOOST_TEST(f.stream.maxAcked == 2u);
+    f.ack(1, 0, f.peerStamp - 1);
     BOOST_TEST(f.stream.maxAdvertisedWindow == 6u);
     BOOST_TEST(f.unacked() == seqs(3, 4));
     BOOST_TEST(f.sendList().empty());
@@ -1067,6 +1076,36 @@ BOOST_AUTO_TEST_CASE(ack_with_equal_max_acked_and_larger_window_is_applied)
     BOOST_TEST(f.stream.maxAdvertisedWindow == 2u);
     f.ack(2, 4);
     BOOST_TEST(f.stream.maxAdvertisedWindow == 6u);
+}
+
+BOOST_AUTO_TEST_CASE(reordered_zero_window_ack_with_equal_max_acked_does_not_close_the_window)
+{
+    // The receiver fails to allocate a recv segment and sends ack(2, 0),
+    // then recovers and sends ack(2, 4) without having received more data.
+    // The two reorder on the network: the recovery arrives first and the
+    // zero window last, with the same maxAcked but an older stamp. The
+    // superseded zero window must not move 3 and 4 back to the send list.
+    SenderFixture f(4);
+    f.write(4);
+    f.send();
+    BOOST_REQUIRE(f.unacked() == seqs(1, 4));
+    BOOST_REQUIRE(f.stream.cCtrl.flightSize == 4u);
+
+    f.ack(2, 4);
+    BOOST_TEST(f.stream.maxAdvertisedWindow == 6u);
+    BOOST_TEST(f.unacked() == seqs(3, 4));
+    BOOST_TEST(f.stream.cCtrl.flightSize == 2u);
+
+    f.ack(2, 4);
+    f.ack(2, 0, f.peerStamp - 1);
+    BOOST_TEST(f.stream.maxAdvertisedWindow == 6u);
+    BOOST_TEST(f.unacked() == seqs(3, 4));
+    BOOST_TEST(f.sendList().empty());
+    BOOST_TEST(f.stream.cCtrl.flightSize == 2u);
+
+    f.ack(4, 4);
+    BOOST_TEST(f.unacked().empty());
+    BOOST_TEST(f.stream.cCtrl.flightSize == 0u);
 }
 
 BOOST_AUTO_TEST_CASE(window_reduction_keeps_flight_size_in_step_with_unacked)
