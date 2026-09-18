@@ -150,6 +150,28 @@ must ACK the response, so the server only keeps the response state
 until that ACK arrives. The server therefore always sends application
 responses as separate responses.
 
+### The request limit is shared by every connection
+
+`nabto_coap_server_limit_requests` bounds the number of concurrent
+requests in a `nabto_coap_server_requests` context, and one context
+is normally shared by every connection the integrator feeds into it.
+The bound protects the device's memory, it does not give the
+connections a fair share of it: a single client can open requests up
+to the limit and leave them pending, and the server then answers
+5.03 Service Unavailable to every other client until those requests
+finish or the offending connection is removed with
+`nabto_coap_server_remove_connection`.
+
+There is deliberately no per-connection limit in the library. A
+client that is not yet authenticated can open as many connections as
+it likes, so a per-connection limit would only move the problem: the
+client makes many connections with a few requests each and depletes
+the same resources. Fairness between clients has to come from the
+layer that owns the connections, which knows who the peer is and can
+limit connections and requests per identity, and a well-behaved
+resource handler answers or fails requests promptly rather than
+holding them.
+
 ### Route tree
 
 The resources of a server form a route tree of path segments; a
