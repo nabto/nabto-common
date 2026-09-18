@@ -57,8 +57,7 @@ bounded with `nabto_coap_server_limit_requests`,
 - Message size limits; the size of the integrator's buffer decides.
 - `ACK_RANDOM_FACTOR`, `NSTART`, `PROBING_RATE` and `EXCHANGE_LIFETIME`
   bookkeeping. Message ids and tokens are sequential counters
-  starting from zero (a randomised start is on the unmerged
-  `coap-l5-random-ids` branch).
+  starting from zero.
 - CoAP ping (an empty CON): the client answers with a RST as
   required, the server answers with 4.04 Not Found.
 - Piggybacked application responses on the server, see the design
