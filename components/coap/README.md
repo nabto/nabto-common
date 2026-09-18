@@ -7,8 +7,6 @@ with an opaque `connection` pointer and pulls outgoing packets out of
 it. Security and multiplexing are the job of the surrounding Nabto
 connection.
 
-Design notes and RFC clarifications live in [src/README.md](src/README.md).
-
 ## Structure
 
 | File | Contents |
@@ -63,8 +61,8 @@ bounded with `nabto_coap_server_limit_requests`,
   `coap-l5-random-ids` branch).
 - CoAP ping (an empty CON): the client answers with a RST as
   required, the server answers with 4.04 Not Found.
-- Piggybacked application responses on the server, see
-  [src/README.md](src/README.md) for the reasoning.
+- Piggybacked application responses on the server, see the design
+  notes below for the reasoning.
 
 ## RFC 7959, block-wise transfers
 
@@ -119,6 +117,53 @@ bounded with `nabto_coap_server_limit_requests`,
 - Missing: NON notifications (no API to select them), Max-Age and ETag
   on notifications, cancelling an observation from the server with an
   error response.
+
+## Design notes
+
+### How long can it be from a request is made until a response is ready
+
+A CoAP exchange has a limited timespan, but a CoAP request/response
+can take as long as the connection is alive. The client therefore
+only bounds the wait for a response with the timeout the caller sets
+on the request (`nabto_coap_client_request_set_timeout`, two minutes
+by default).
+
+### Why there are no tokens in ACK and RST messages
+
+RFC 7252 section 4.4 states that ACK and RST are correlated with the
+message they answer by message id alone, and elsewhere that an empty
+ACK is a four byte message. Each CON transmission is identified by
+its message id and endpoint, so a token is not needed.
+
+### Piggybacked vs separate responses
+
+With piggybacked responses, i.e. sending the response in the ACK, the
+server has to keep the response state until it is sure that the client
+will not retransmit the request. With separate responses the client
+must ACK the response, so the server only keeps the response state
+until that ACK arrives. The server therefore always sends application
+responses as separate responses.
+
+### Route tree
+
+The resources of a server form a route tree of path segments; a
+segment written as `{name}` is a parameter whose value is available to
+the handler through `nabto_coap_server_request_get_parameter`. Each
+node holds one handler per method:
+
+```
+/iam/users                        GET, POST
+/iam/users/{user}                 GET, DELETE
+/iam/users/{user}/roles/{role}    PUT, DELETE
+/iam/roles                        GET, POST
+/iam/roles/{role}                 GET, DELETE
+/iam/roles/{role}/policies/{policy}  PUT, DELETE
+```
+
+The tree is built by `nabto_coap_server_add_resource` from a NULL
+terminated segment array, e.g. `{ "iam", "users", "{user}", NULL }`,
+and is represented by `struct nabto_coap_router_node` in
+`src/nabto_coap_server_impl.h`.
 
 ## Not implemented at all
 
