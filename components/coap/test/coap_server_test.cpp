@@ -300,6 +300,23 @@ class TestServer {
         }
     }
 
+    // Ask for a further Block2 block with a CON GET and return the CON
+    // block, after checking the empty ACK that precedes it.
+    SentMessage requestBlock2(const std::string& token, uint16_t messageId, uint32_t num, uint32_t szx)
+    {
+        handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, messageId, token).block2(num, szx).build());
+        std::vector<SentMessage> sent = drain();
+        BOOST_REQUIRE(sent.size() == 2);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+        BOOST_TEST(sent[0].code == NABTO_COAP_CODE_EMPTY);
+        BOOST_TEST(sent[0].messageId == messageId);
+        BOOST_TEST(sent[1].type == NABTO_COAP_TYPE_CON);
+        BOOST_TEST(sent[1].code == NABTO_COAP_CODE_CONTENT);
+        BOOST_TEST(sent[1].token == token);
+        BOOST_TEST(sent[1].hasBlock2);
+        return sent[1];
+    }
+
     // Issue a CON GET with Observe=0 and accept the registration; the
     // request is left with the test to answer.
     void registerObserver(const std::string& token, uint16_t messageId)
@@ -802,19 +819,44 @@ BOOST_AUTO_TEST_CASE(block2_response_of_exact_block_multiple_completes_on_last_a
     BOOST_TEST(sent[0].payload == body.substr(0, 512));
     s.handlePacket(ackPacket(sent[0].messageId));
 
-    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xe002, "t1").block2(1, 5).build());
-    sent = s.drain();
-    BOOST_REQUIRE(sent.size() == 1);
-    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTENT);
-    BOOST_TEST(sent[0].hasBlock2);
-    BOOST_TEST(sent[0].block2 == blockOption(1, false, 5));
-    BOOST_TEST(sent[0].payload == body.substr(512));
-    s.handlePacket(ackPacket(sent[0].messageId));
+    SentMessage block = s.requestBlock2("t1", 0xe002, 1, 5);
+    BOOST_TEST(block.block2 == blockOption(1, false, 5));
+    BOOST_TEST(block.payload == body.substr(512));
+    s.handlePacket(ackPacket(block.messageId));
     BOOST_TEST(s.requests.activeRequests == 0u);
 
     s.now += NABTO_COAP_ACK_TIMEOUT;
     nabto_coap_server_handle_timeout(&s.requests);
     BOOST_TEST(s.drain().empty());
+}
+
+// Audit N5 (sc-4862): RFC 7252 section 4.2, a CON request for a further
+// Block2 block is a CON of its own and must be acknowledged; the server
+// only sent the CON block. An RFC client kept retransmitting the
+// request, and each retransmit set the block up again with a fresh
+// message id and a reset retransmission count. A retransmit is now a
+// duplicate (section 4.5): acked again, but the block is set up once.
+BOOST_AUTO_TEST_CASE(con_request_for_next_block2_block_is_acked)
+{
+    TestServer s;
+    const std::string body(1024, 'x'); // two 512 byte blocks
+    s.startBlock2Response("t1", body, 0xe101);
+
+    SentMessage block = s.requestBlock2("t1", 0xe102, 1, 5);
+    BOOST_TEST(block.block2 == blockOption(1, false, 5));
+    BOOST_TEST(block.payload == body.substr(512));
+
+    // The client did not get the ACK and retransmits the block request.
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xe102, "t1").block2(1, 5).build());
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_EMPTY);
+    BOOST_TEST(sent[0].messageId == 0xe102);
+
+    // The block in flight is still the one sent first.
+    s.handlePacket(ackPacket(block.messageId));
+    BOOST_TEST(s.requests.activeRequests == 0u);
 }
 
 // Audit H1 (sc-4811): the block number of a Block2 request was used as
@@ -939,25 +981,17 @@ BOOST_AUTO_TEST_CASE(block2_request_with_smaller_block_size_is_served)
     s.startBlock2Response("t1", body, 0xf301);
 
     // Block 1 of 256 bytes is the second half of the first 512 byte block.
-    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xf302, "t1").block2(1, 4).build());
-    std::vector<SentMessage> sent = s.drain();
-    BOOST_REQUIRE(sent.size() == 1);
-    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTENT);
-    BOOST_TEST(sent[0].hasBlock2);
-    BOOST_TEST(sent[0].block2 == blockOption(1, true, 4));
-    BOOST_TEST(sent[0].payload == body.substr(256, 256));
-    s.handlePacket(ackPacket(sent[0].messageId));
+    SentMessage block = s.requestBlock2("t1", 0xf302, 1, 4);
+    BOOST_TEST(block.block2 == blockOption(1, true, 4));
+    BOOST_TEST(block.payload == body.substr(256, 256));
+    s.handlePacket(ackPacket(block.messageId));
     BOOST_TEST(s.requests.activeRequests == 1u);
 
     // The last 256 byte block completes the exchange.
-    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xf303, "t1").block2(3, 4).build());
-    sent = s.drain();
-    BOOST_REQUIRE(sent.size() == 1);
-    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTENT);
-    BOOST_TEST(sent[0].hasBlock2);
-    BOOST_TEST(sent[0].block2 == blockOption(3, false, 4));
-    BOOST_TEST(sent[0].payload == body.substr(768));
-    s.handlePacket(ackPacket(sent[0].messageId));
+    block = s.requestBlock2("t1", 0xf303, 3, 4);
+    BOOST_TEST(block.block2 == blockOption(3, false, 4));
+    BOOST_TEST(block.payload == body.substr(768));
+    s.handlePacket(ackPacket(block.messageId));
     BOOST_TEST(s.requests.activeRequests == 0u);
 }
 
