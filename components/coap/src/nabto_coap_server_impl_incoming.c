@@ -9,7 +9,6 @@
 static const char* unsupportedCriticalOption = "Unsupported critical option";
 static const char* outOfResources = "Out of resources";
 static const char* wrongPayloadLength = "Wrong payload length";
-static const char* badBlockOption = "Bad block option";
 static const char* requestTooLarge = "Request entity too large";
 
 
@@ -239,8 +238,7 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests
     bool block1Done = true;
 
     // RFC 7959 section 2.2: SZX 7 is reserved and MUST lead to 4.00 Bad
-    // Request, also in a Block2 the client sends to suggest a response
-    // block size, which is otherwise ignored.
+    // Request, also in a Block2 the client sends with the request.
     if ((message->hasBlock1 && NABTO_COAP_BLOCK_SIZE(message->block1) == 7) ||
         (message->hasBlock2 && NABTO_COAP_BLOCK_SIZE(message->block2) == 7))
     {
@@ -250,6 +248,16 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests
         request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
         nabto_coap_server_free_request(request);
         return;
+    }
+
+    // RFC 7959 section 2.4: a Block2 in the request gives the block size
+    // and the block number the client wants served, whether to
+    // negotiate the size early or because it uses a new token for each
+    // block. Whether the block exists is only known once the handler
+    // has set the payload, see nabto_coap_server_response_ready.
+    if (message->hasBlock2) {
+        request->response.block2Current = NABTO_COAP_BLOCK_NUM(message->block2);
+        request->response.block2Size = NABTO_COAP_BLOCK_SIZE(message->block2);
     }
 
     // RFC 7959 section 2.9.3: 4.13 Request Entity Too Large "can be

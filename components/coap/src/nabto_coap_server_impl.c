@@ -6,6 +6,7 @@
 #include <nn/string_map.h>
 
 const char* unhandledRequest = "Request unhandled";
+const char* badBlockOption = "Bad block option";
 
 // Drop the current response payload, freeing it unless it is static.
 static void nabto_coap_server_response_release_payload(struct nabto_coap_server_request* request)
@@ -17,6 +18,19 @@ static void nabto_coap_server_response_release_payload(struct nabto_coap_server_
     response->payload = NULL;
     response->payloadLength = 0;
     response->staticPayload = false;
+}
+
+// Replace whatever the response holds with an error and a static
+// diagnostic, sent from the first block.
+static void nabto_coap_server_response_set_static_error(struct nabto_coap_server_request* request, nabto_coap_code code, const char* description)
+{
+    struct nabto_coap_server_response* response = &request->response;
+    nabto_coap_server_response_release_payload(request);
+    response->staticPayload = true;
+    response->code = code;
+    response->payload = (uint8_t*)description;
+    response->payloadLength = strlen(description);
+    response->block2Current = 0;
 }
 
 nabto_coap_error nabto_coap_server_init(struct nabto_coap_server* server, struct nn_log* logger, struct nn_allocator* allocator)
@@ -124,15 +138,7 @@ void nabto_coap_server_request_free(struct nabto_coap_server_request* request)
         request->state == NABTO_COAP_SERVER_REQUEST_STATE_USER)
     {
         // The user may have set a payload without ever calling response_ready.
-        nabto_coap_server_response_release_payload(request);
-        request->response.staticPayload = true;
-        nabto_coap_server_response_set_code(request, NABTO_COAP_CODE_INTERNAL_SERVER_ERROR);
-        request->response.payload = (void*)unhandledRequest;
-        request->response.payloadLength = strlen(unhandledRequest);
-        if (strlen(unhandledRequest) > (16u << request->response.block2Size)) {
-            request->response.hasBlock2 = true;
-            request->response.block2Current = 0;
-        }
+        nabto_coap_server_response_set_static_error(request, NABTO_COAP_CODE_INTERNAL_SERVER_ERROR, unhandledRequest);
         nabto_coap_server_response_ready(request);
     }
     request->isFreed = true;
@@ -819,10 +825,6 @@ nabto_coap_error nabto_coap_server_response_set_payload(struct nabto_coap_server
     }
     memcpy(request->response.payload, data, dataSize);
     request->response.payloadLength = dataSize;
-    if (dataSize > (16u << request->response.block2Size)) {
-        request->response.hasBlock2 = true;
-        request->response.block2Current = 0;
-    }
     return NABTO_COAP_ERROR_OK;
 }
 
@@ -841,6 +843,18 @@ nabto_coap_error nabto_coap_server_response_ready(struct nabto_coap_server_reque
         //nabto_coap_server_free_request(request);
         return NABTO_COAP_ERROR_NO_CONNECTION;
     } else {
+        // The block the client asked for in the request (see
+        // nabto_coap_server_handle_data_for_request) can only be checked
+        // now that the payload is known. Same rule as
+        // nabto_coap_server_handle_data_for_response: a block at or past
+        // the end is a 4.00 Bad Request, the final response for this
+        // token. It is a separate response, the request was ACKed before
+        // the handler ran.
+        struct nabto_coap_server_response* response = &request->response;
+        size_t offset = response->block2Current * (16u << response->block2Size);
+        if (offset != 0 && offset >= response->payloadLength) {
+            nabto_coap_server_response_set_static_error(request, NABTO_COAP_CODE_BAD_REQUEST, badBlockOption);
+        }
         request->state = NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE;
         request->response.sendNow = true;
         request->requests->notifyEvent(request->requests->userData);

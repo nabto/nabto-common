@@ -961,6 +961,134 @@ BOOST_AUTO_TEST_CASE(block2_request_with_smaller_block_size_is_served)
     BOOST_TEST(s.requests.activeRequests == 0u);
 }
 
+// Audit N6 (sc-4863): RFC 7959 section 2.4, the client fetches later
+// blocks with "further requests with the same options as the initial
+// request and a Block2 Option giving the block number and block size
+// desired", and section 3.4, "the client is free to choose tokens for
+// each exchange as it likes". A Block2 on a new token was dropped and
+// block 0 served, so such a client never got past block 1.
+BOOST_AUTO_TEST_CASE(block2_request_on_new_token_is_served_from_requested_block)
+{
+    TestServer s;
+    std::string body;
+    for (int i = 0; i < 2048; i++) {
+        body.push_back((char)('a' + (i / 512)));
+    }
+
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xf401, "t1").block2(2, 5).build());
+    BOOST_TEST(s.drain().size() == 1u); // empty ACK
+    BOOST_REQUIRE(s.request != NULL);
+    BOOST_TEST(s.handlerCalls == 1u);
+    BOOST_REQUIRE(nabto_coap_server_response_set_payload(s.request, body.data(), body.size()) == NABTO_COAP_ERROR_OK);
+    nabto_coap_server_response_set_code(s.request, NABTO_COAP_CODE_CONTENT);
+    BOOST_REQUIRE(nabto_coap_server_response_ready(s.request) == NABTO_COAP_ERROR_OK);
+    nabto_coap_server_request_free(s.request);
+
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_CON);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTENT);
+    BOOST_TEST(sent[0].token == "t1");
+    BOOST_TEST(sent[0].hasBlock2);
+    BOOST_TEST(sent[0].block2 == blockOption(2, true, 5));
+    BOOST_TEST(sent[0].payload == body.substr(1024, 512));
+    s.handlePacket(ackPacket(sent[0].messageId));
+    BOOST_TEST(s.requests.activeRequests == 1u);
+
+    // The last block on the same token completes the exchange.
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xf402, "t1").block2(3, 5).build());
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTENT);
+    BOOST_TEST(sent[0].block2 == blockOption(3, false, 5));
+    BOOST_TEST(sent[0].payload == body.substr(1536));
+    s.handlePacket(ackPacket(sent[0].messageId));
+    BOOST_TEST(s.requests.activeRequests == 0u);
+    BOOST_TEST(s.handlerCalls == 1u);
+}
+
+// RFC 7959 section 2.4: "the requester MAY also use the Block2 Option on
+// the initial request, giving the desired size, a block number of zero
+// and an M bit of zero" and "A server MUST use the block size indicated
+// or a smaller size".
+BOOST_AUTO_TEST_CASE(block2_size_in_request_is_used_for_the_response)
+{
+    TestServer s;
+    const std::string body(1024, 'x');
+
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xf501, "t1").block2(0, 4).build());
+    BOOST_TEST(s.drain().size() == 1u); // empty ACK
+    BOOST_REQUIRE(s.request != NULL);
+    BOOST_REQUIRE(nabto_coap_server_response_set_payload(s.request, body.data(), body.size()) == NABTO_COAP_ERROR_OK);
+    nabto_coap_server_response_set_code(s.request, NABTO_COAP_CODE_CONTENT);
+    BOOST_REQUIRE(nabto_coap_server_response_ready(s.request) == NABTO_COAP_ERROR_OK);
+    nabto_coap_server_request_free(s.request);
+
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTENT);
+    BOOST_TEST(sent[0].hasBlock2);
+    BOOST_TEST(sent[0].block2 == blockOption(0, true, 4));
+    BOOST_TEST(sent[0].payload == body.substr(0, 256));
+    s.handlePacket(ackPacket(sent[0].messageId));
+    BOOST_TEST(s.requests.activeRequests == 1u);
+}
+
+// A block at or past the end of the body is a 4.00, as it is for a
+// request on the token of a response in progress. The body is only
+// known once the handler has answered, so the 4.00 is a separate
+// response rather than piggybacked in the ACK.
+BOOST_AUTO_TEST_CASE(block2_request_on_new_token_past_end_of_payload_gets_bad_request)
+{
+    // Block 2 starts exactly at the end of the payload, block 3 one
+    // block past it.
+    for (uint32_t num = 2; num <= 3; num++) {
+        TestServer s;
+        const std::string body(1024, 'x'); // two 512 byte blocks
+
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xf601, "t1").block2(num, 5).build());
+        BOOST_TEST(s.drain().size() == 1u); // empty ACK
+        BOOST_REQUIRE(s.request != NULL);
+        BOOST_REQUIRE(nabto_coap_server_response_set_payload(s.request, body.data(), body.size()) == NABTO_COAP_ERROR_OK);
+        nabto_coap_server_response_set_code(s.request, NABTO_COAP_CODE_CONTENT);
+        BOOST_REQUIRE(nabto_coap_server_response_ready(s.request) == NABTO_COAP_ERROR_OK);
+        nabto_coap_server_request_free(s.request);
+
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_CON);
+        BOOST_TEST(sent[0].code == NABTO_COAP_CODE_BAD_REQUEST);
+        BOOST_TEST(sent[0].token == "t1");
+        BOOST_TEST(!sent[0].hasBlock2);
+        BOOST_TEST(sent[0].payload == "Bad block option");
+        s.handlePacket(ackPacket(sent[0].messageId));
+        BOOST_TEST(s.requests.activeRequests == 0u);
+    }
+    {
+        // The largest offset a client can ask for, as a NON.
+        TestServer s;
+        const std::string body(1024, 'x');
+
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_NON, NABTO_COAP_CODE_GET, 0xf602, "t1").block2(0xFFFFF, 6).build());
+        BOOST_TEST(s.drain().size() == 0u); // a NON is not ACKed
+        BOOST_REQUIRE(s.request != NULL);
+        BOOST_REQUIRE(nabto_coap_server_response_set_payload(s.request, body.data(), body.size()) == NABTO_COAP_ERROR_OK);
+        nabto_coap_server_response_set_code(s.request, NABTO_COAP_CODE_CONTENT);
+        BOOST_REQUIRE(nabto_coap_server_response_ready(s.request) == NABTO_COAP_ERROR_OK);
+        nabto_coap_server_request_free(s.request);
+
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_NON);
+        BOOST_TEST(sent[0].code == NABTO_COAP_CODE_BAD_REQUEST);
+        BOOST_TEST(sent[0].token == "t1");
+        BOOST_TEST(sent[0].payload == "Bad block option");
+        // NON responses are released on the next timeout.
+        s.timeoutTick();
+        BOOST_TEST(s.requests.activeRequests == 0u);
+    }
+}
+
 // Audit H3 (sc-4813): the body of a Block1 request was reassembled
 // without any bound, so a client could grow it a chunk at a time until
 // the device ran out of memory, before the handler ever saw the request.

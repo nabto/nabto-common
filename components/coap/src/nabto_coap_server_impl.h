@@ -71,8 +71,6 @@ struct nabto_coap_server_response {
     bool hasContentFormat;
     uint16_t contentFormat;
 
-    bool hasBlock2;
-
     uint8_t* payload;
     size_t payloadLength;
     bool staticPayload;
@@ -143,6 +141,10 @@ struct nabto_coap_router_node {
     struct nabto_coap_server_resource putHandler;
     struct nabto_coap_server_resource deleteHandler;
 };
+
+// Diagnostic payload of the 4.00 for a Block2 that cannot be served,
+// shared by the request and response paths.
+extern const char* badBlockOption;
 
 void nabto_coap_server_insert_request_into_list(struct nabto_coap_server_request* e1, struct nabto_coap_server_request* request);
 
