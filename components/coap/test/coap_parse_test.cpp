@@ -302,4 +302,14 @@ BOOST_AUTO_TEST_CASE(encode_option_stays_inside_buffer)
     BOOST_TEST(small[4] == guard);
 }
 
+// The largest block a Block option can name is NUM 0xFFFFF at 2048
+// bytes; its offset is below 2^31 and must not wrap on any width.
+BOOST_AUTO_TEST_CASE(block_offset_of_largest_block_does_not_wrap)
+{
+    BOOST_TEST(nabto_coap_block_offset(0, 5) == 0u);
+    BOOST_TEST(nabto_coap_block_offset(2, 5) == 1024u);
+    BOOST_TEST(nabto_coap_block_offset(0xFFFFF, 7) == 0x7FFFF800u);
+    BOOST_TEST(NABTO_COAP_BLOCK_OFFSET((0xFFFFFu << 4) | 7u) == 0x7FFFF800u);
+}
+
 BOOST_AUTO_TEST_SUITE_END()

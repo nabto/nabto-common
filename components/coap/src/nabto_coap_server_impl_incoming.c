@@ -274,7 +274,7 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests
     }
 
     if (message->hasBlock1) {
-        uint32_t offset = NABTO_COAP_BLOCK_OFFSET(message->block1);
+        size_t offset = NABTO_COAP_BLOCK_OFFSET(message->block1);
         if (request->payloadLength != offset) {
             nabto_coap_server_make_error_response(requests, request->connection, message, NABTO_COAP_CODE_REQUEST_ENTITY_INCOMPLETE, NULL);
             request->isFreed = true;
@@ -366,7 +366,7 @@ void nabto_coap_server_handle_data_for_response(struct nabto_coap_server_request
         // request as well; the send path would otherwise read past the
         // payload buffer. The error is the final response for this token,
         // so the exchange is over.
-        uint32_t offset = 0;
+        size_t offset = 0;
         bool badBlock = (NABTO_COAP_BLOCK_SIZE(message->block2) == 7);
         if (!badBlock) {
             offset = NABTO_COAP_BLOCK_OFFSET(message->block2);
@@ -476,7 +476,7 @@ void nabto_coap_server_handle_ack(struct nabto_coap_server_requests* requests, s
 
     // The last block ends exactly at payloadLength when the payload is a
     // multiple of the block size, so >= is the completion test.
-    if (response->block2Current * blockSize >= response->payloadLength) {
+    if (nabto_coap_block_offset(response->block2Current, response->block2Size) >= response->payloadLength) {
         request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
         nabto_coap_server_free_request(request);
         return;

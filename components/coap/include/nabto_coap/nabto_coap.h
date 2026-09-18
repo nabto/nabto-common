@@ -170,7 +170,16 @@ struct nabto_coap_incoming_message {
 #define NABTO_COAP_BLOCK_SIZE_ABSOLUTE(value) (16u << NABTO_COAP_BLOCK_SIZE(value))
 #define NABTO_COAP_BLOCK_NUM(value) ((value) >> 4)
 #define NABTO_COAP_BLOCK_MORE(value) (((value) & 0xF) >> 3)
-#define NABTO_COAP_BLOCK_OFFSET(value) (NABTO_COAP_BLOCK_SIZE_ABSOLUTE(value) * NABTO_COAP_BLOCK_NUM(value))
+
+/**
+ * Byte offset of a block, block number times block size. NUM is at most
+ * 20 bits and SZX at most 7 (2048 byte blocks), so the product is below
+ * 2^31 and fits size_t on every target; it is computed in size_t so no
+ * intermediate is narrower than the result.
+ */
+size_t nabto_coap_block_offset(uint32_t blockNum, uint32_t szx);
+
+#define NABTO_COAP_BLOCK_OFFSET(value) nabto_coap_block_offset(NABTO_COAP_BLOCK_NUM(value), NABTO_COAP_BLOCK_SIZE(value))
 
 
 /**

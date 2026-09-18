@@ -245,7 +245,7 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
 
     if (message->hasBlock1) {
         request->block1Current += 1;
-        if (request->block1Current * NABTO_COAP_BLOCK_SIZE_ABSOLUTE(request->block1Size) < request->payloadLength) {
+        if (nabto_coap_block_offset(request->block1Current, request->block1Size) < request->payloadLength) {
             request->state = NABTO_COAP_CLIENT_REQUEST_STATE_SEND_REQUEST;
             request->messageId = nabto_coap_client_next_message_id(client);
             request->retransmissions = 0;
@@ -262,7 +262,7 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
         request->retransmissions = 0;
     } else if (message->hasBlock1 && message->code == NABTO_COAP_CODE_CONTINUE) {
         request->block1Current += 1;
-        if (request->block1Current * NABTO_COAP_BLOCK_SIZE_ABSOLUTE(request->block1Size) < request->payloadLength) {
+        if (nabto_coap_block_offset(request->block1Current, request->block1Size) < request->payloadLength) {
             request->state = NABTO_COAP_CLIENT_REQUEST_STATE_SEND_REQUEST;
             request->messageId = nabto_coap_client_next_message_id(client);
             request->retransmissions = 0;
@@ -489,7 +489,7 @@ uint8_t* nabto_coap_client_request_create_packet(struct nabto_coap_client_reques
     }
 
     size_t blockSize = (16 << request->block1Size);
-    size_t payloadOffset = (request->block1Current * blockSize);
+    size_t payloadOffset = nabto_coap_block_offset(request->block1Current, request->block1Size);
     if (payloadOffset < request->payloadLength) {
         size_t payloadRestLength = request->payloadLength - payloadOffset;
 

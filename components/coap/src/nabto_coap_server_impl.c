@@ -457,7 +457,7 @@ static uint8_t* nabto_coap_server_send_in_response_state(struct nabto_coap_serve
     }
 
     size_t blockSize = (16 << response->block2Size);
-    size_t payloadOffset = (response->block2Current * blockSize);
+    size_t payloadOffset = nabto_coap_block_offset(response->block2Current, response->block2Size);
     // The incoming path rejects blocks past the payload; never read
     // past it here either.
     size_t payloadRestLength = 0;
@@ -851,7 +851,7 @@ nabto_coap_error nabto_coap_server_response_ready(struct nabto_coap_server_reque
         // token. It is a separate response, the request was ACKed before
         // the handler ran.
         struct nabto_coap_server_response* response = &request->response;
-        size_t offset = response->block2Current * (16u << response->block2Size);
+        size_t offset = nabto_coap_block_offset(response->block2Current, response->block2Size);
         if (offset != 0 && offset >= response->payloadLength) {
             nabto_coap_server_response_set_static_error(request, NABTO_COAP_CODE_BAD_REQUEST, badBlockOption);
         }
