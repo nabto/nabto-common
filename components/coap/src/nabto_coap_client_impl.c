@@ -1,5 +1,10 @@
 #include "nabto_coap_client_impl.h"
 
+// Stamps are ordered by their signed 32 bit difference, so no timeout
+// may put a deadline 2^31 ms or more ahead. Timeouts are clamped to
+// this before they are used.
+#define NABTO_COAP_CLIENT_MAX_TIMEOUT (1u << 30)
+
 static void nabto_coap_client_next_token(struct nabto_coap_client* client, nabto_coap_token* tokenOut);
 static struct nabto_coap_client_request* nabto_coap_client_find_request(struct nabto_coap_client* client, struct nabto_coap_incoming_message* message, void* connection);
 
@@ -293,8 +298,12 @@ void nabto_coap_client_handle_rst(struct nabto_coap_client* client, struct nabto
     // reset's is only correlated by message id, not by tokens.
     struct nabto_coap_client_request* iterator = client->requestsSentinel->next;
     while(iterator != client->requestsSentinel) {
+        // RFC 7252 section 4.2: a CON is either acknowledged or reset,
+        // so once the ack has arrived a RST for it is stale. Section
+        // 4.3: a NON can be reset at any time.
         if (iterator->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_ACK ||
-            iterator->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE)
+            (iterator->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE &&
+             iterator->type == NABTO_COAP_TYPE_NON))
         {
             if (iterator->messageId == message->messageId && iterator->connection == connection) {
                 iterator->status = NABTO_COAP_CLIENT_STATUS_RESET;
@@ -524,17 +533,15 @@ uint8_t* nabto_coap_client_request_create_packet(struct nabto_coap_client_reques
 }
 
 // RFC 7252 section 4.2: the ack timeout doubles for each
-// retransmission. Stamps are ordered by their signed 32 bit difference,
-// so the result is kept below 2^31 whatever ackTimeoutMilliseconds and
-// maxRetransmits the integrator picked.
+// retransmission, within NABTO_COAP_CLIENT_MAX_TIMEOUT whatever
+// ackTimeoutMilliseconds and maxRetransmits the integrator picked.
 static uint32_t nabto_coap_client_ack_timeout(struct nabto_coap_client* client, uint8_t retransmissions)
 {
-    const uint32_t max = 1u << 30;
     uint32_t timeout = client->settings.ackTimeoutMilliseconds;
-    if (timeout > max) {
-        timeout = max;
+    if (timeout > NABTO_COAP_CLIENT_MAX_TIMEOUT) {
+        timeout = NABTO_COAP_CLIENT_MAX_TIMEOUT;
     }
-    for (uint8_t i = 0; i < retransmissions && timeout < max; i++) {
+    for (uint8_t i = 0; i < retransmissions && timeout < NABTO_COAP_CLIENT_MAX_TIMEOUT; i++) {
         timeout *= 2;
     }
     return timeout;
@@ -608,16 +615,12 @@ void nabto_coap_client_handle_timeout(struct nabto_coap_client* client, uint32_t
                 }
             } else if (request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE) {
                 if (nabto_coap_is_stamp_less_equal(request->timeoutStamp, now)) {
+                    // Nothing is sent: a RST can only answer a
+                    // received message (RFC 7252 section 4.2), and a
+                    // late response is reset when it arrives with no
+                    // request to match it.
                     request->status = NABTO_COAP_CLIENT_STATUS_TIMEOUT;
                     request->state = NABTO_COAP_CLIENT_REQUEST_STATE_DONE_CALLBACK;
-                    // RFC 7252 section 4.3: a NON message is never
-                    // acknowledged or reset, so there is nothing for
-                    // a RST to refer to.
-                    if (request->type == NABTO_COAP_TYPE_CON) {
-                        client->needSendRst = true;
-                        client->messageIdRst = request->messageId;
-                        client->connectionRst = request->connection;
-                    }
                 }
                 /**
                  * we have received an ack on our con request, we are
@@ -701,13 +704,9 @@ void nabto_coap_client_request_cancel(struct nabto_coap_client_request* request)
     } else if (request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_ACK ||
                request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE)
     {
-        // RFC 7252 section 4.3: a NON message is never acknowledged or
-        // reset, so there is nothing for a RST to refer to.
-        if (request->type == NABTO_COAP_TYPE_CON) {
-            client->needSendRst = true;
-            client->messageIdRst = request->messageId;
-            client->connectionRst = request->connection;
-        }
+        // Nothing is sent: a RST can only answer a received message
+        // (RFC 7252 section 4.2), and a late response is reset when it
+        // arrives with no request to match it.
         request->state = NABTO_COAP_CLIENT_REQUEST_STATE_DONE_CALLBACK;
         request->status = NABTO_COAP_CLIENT_STATUS_STOPPED;
         client->notifyEvent(client->userData);
@@ -781,6 +780,9 @@ nabto_coap_error nabto_coap_client_request_set_payload(struct nabto_coap_client_
 
 void nabto_coap_client_request_set_timeout(struct nabto_coap_client_request* request, uint32_t timeout)
 {
+    if (timeout > NABTO_COAP_CLIENT_MAX_TIMEOUT) {
+        timeout = NABTO_COAP_CLIENT_MAX_TIMEOUT;
+    }
     request->configuredTimeoutMilliseconds = timeout;
 }
 

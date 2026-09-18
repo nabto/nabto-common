@@ -262,10 +262,26 @@ BOOST_AUTO_TEST_CASE(rst_completes_request_with_reset_status)
         BOOST_TEST(nabto_coap_client_get_next_event(&c.client, c.now) == NABTO_COAP_CLIENT_NEXT_EVENT_NOTHING);
     }
     {
-        // RST of a separate response after the request was acked.
+        // RFC 7252 section 4.2: a CON is either acked or reset. Once
+        // the ack has arrived a RST with the request's id is stale and
+        // the request keeps waiting for its separate response.
         TestClient c;
         SentMessage req = c.sendRequest();
         BOOST_TEST(c.handlePacket(emptyPacket(NABTO_COAP_TYPE_ACK, req.messageId)) == NABTO_COAP_CLIENT_STATUS_OK);
+        BOOST_TEST(c.request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE);
+        BOOST_TEST(c.handlePacket(emptyPacket(NABTO_COAP_TYPE_RST, req.messageId)) == NABTO_COAP_CLIENT_STATUS_OK);
+        BOOST_TEST(!c.runCallback());
+        BOOST_TEST(c.request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE);
+        BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_NON, NABTO_COAP_CODE_CONTENT, 0x4242, req.token).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+        BOOST_TEST(c.runCallback());
+        BOOST_TEST(c.endHandlerCalls == 1u);
+        BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_OK);
+    }
+    {
+        // RFC 7252 section 4.3: a NON request can be reset at any time.
+        TestClient c;
+        nabto_coap_client_request_set_nonconfirmable(c.request);
+        SentMessage req = c.sendRequest();
         BOOST_TEST(c.request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE);
         BOOST_TEST(c.handlePacket(emptyPacket(NABTO_COAP_TYPE_RST, req.messageId)) == NABTO_COAP_CLIENT_STATUS_OK);
         BOOST_TEST(c.runCallback());
@@ -326,6 +342,22 @@ BOOST_AUTO_TEST_CASE(ack_backoff_stops_before_the_stamp_range)
         BOOST_TEST(c.drain().empty());
         nabto_coap_client_handle_timeout(&c.client, c.now + (1u << 30));
         BOOST_TEST(c.drain().size() == 1u);
+    }
+    {
+        // So is a response timeout past the range, for an acked CON
+        // request and for a NON request.
+        TestClient c;
+        nabto_coap_client_request_set_timeout(c.request, 0x80000000u);
+        SentMessage req = c.sendRequest();
+        BOOST_TEST(c.handlePacket(emptyPacket(NABTO_COAP_TYPE_ACK, req.messageId)) == NABTO_COAP_CLIENT_STATUS_OK);
+        BOOST_TEST(c.request->timeoutStamp == c.now + (1u << 30));
+    }
+    {
+        TestClient c;
+        nabto_coap_client_request_set_nonconfirmable(c.request);
+        nabto_coap_client_request_set_timeout(c.request, 0x80000000u);
+        c.sendRequest();
+        BOOST_TEST(c.request->timeoutStamp == c.now + (1u << 30));
     }
 
     TestClient c;
@@ -390,13 +422,12 @@ BOOST_AUTO_TEST_CASE(nonconfirmable_request_is_sent_as_non)
 }
 
 // A RST only ever answers a received message (RFC 7252 section 4.2),
-// and a NON request is never acknowledged or reset (section 4.3), so
-// neither a response timeout nor a cancel of a NON request may send
-// one. A CON request in the same situation still does.
-BOOST_AUTO_TEST_CASE(nonconfirmable_request_never_sends_rst)
+// so neither a response timeout nor a cancel may send one carrying
+// the request's own message id, whatever the request type.
+BOOST_AUTO_TEST_CASE(timeout_and_cancel_never_send_rst)
 {
     {
-        // Response timeout.
+        // Response timeout of a NON request.
         TestClient c;
         nabto_coap_client_request_set_nonconfirmable(c.request);
         nabto_coap_client_request_set_timeout(c.request, 5000);
@@ -408,7 +439,19 @@ BOOST_AUTO_TEST_CASE(nonconfirmable_request_never_sends_rst)
         BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_TIMEOUT);
     }
     {
-        // Cancel.
+        // Response timeout of an acked CON request.
+        TestClient c;
+        nabto_coap_client_request_set_timeout(c.request, 5000);
+        SentMessage req = c.sendRequest();
+        BOOST_TEST(c.handlePacket(emptyPacket(NABTO_COAP_TYPE_ACK, req.messageId)) == NABTO_COAP_CLIENT_STATUS_OK);
+        c.now += 5000;
+        nabto_coap_client_handle_timeout(&c.client, c.now);
+        BOOST_TEST(c.drain().empty());
+        BOOST_TEST(c.runCallback());
+        BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_TIMEOUT);
+    }
+    {
+        // Cancel of a NON request.
         TestClient c;
         nabto_coap_client_request_set_nonconfirmable(c.request);
         c.sendRequest();
@@ -418,14 +461,11 @@ BOOST_AUTO_TEST_CASE(nonconfirmable_request_never_sends_rst)
         BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_STOPPED);
     }
     {
-        // A cancelled CON request still sends the RST.
+        // Cancel of a CON request waiting for its ack.
         TestClient c;
-        SentMessage req = c.sendRequest();
+        c.sendRequest();
         nabto_coap_client_request_cancel(c.request);
-        std::vector<SentMessage> sent = c.drain();
-        BOOST_REQUIRE(sent.size() == 1);
-        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_RST);
-        BOOST_TEST(sent[0].messageId == req.messageId);
+        BOOST_TEST(c.drain().empty());
         BOOST_TEST(c.runCallback());
         BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_STOPPED);
     }
