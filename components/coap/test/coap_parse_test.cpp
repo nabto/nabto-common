@@ -45,6 +45,36 @@ OptionField optionField(uint32_t value)
 
 BOOST_AUTO_TEST_SUITE(coap_parse)
 
+// RFC 7959 section 2.2: SZX 0 to 6 are 16 to 1024 bytes. The helper exists
+// because several call sites handed a bare SZX to
+// NABTO_COAP_BLOCK_SIZE_ABSOLUTE, which takes a whole Block option value
+// and only happened to agree because its mask was a no-op there.
+BOOST_AUTO_TEST_CASE(block_size_from_szx_covers_the_range)
+{
+    BOOST_TEST(nabto_coap_block_size_from_szx(0) == 16u);
+    BOOST_TEST(nabto_coap_block_size_from_szx(5) == 512u);
+    BOOST_TEST(nabto_coap_block_size_from_szx(6) == 1024u);
+    // Agrees with the whole-option macro when the option is just an SZX.
+    BOOST_TEST(nabto_coap_block_size_from_szx(6) == NABTO_COAP_BLOCK_SIZE_ABSOLUTE(6));
+    // And with the size the option of a real block carries.
+    BOOST_TEST(nabto_coap_block_size_from_szx(NABTO_COAP_BLOCK_SIZE((9u << 4) | (1u << 3) | 6u)) == 1024u);
+}
+
+// The offset is the one place the two are multiplied together, and it is
+// the product rather than either factor that could overflow a narrower
+// type. NUM is 20 bits and SZX at most 7, so the largest offset is just
+// under 2^31 and must not be computed in a 32 bit int.
+BOOST_AUTO_TEST_CASE(block_offset_is_computed_in_size_t)
+{
+    BOOST_TEST(nabto_coap_block_offset(0, 5) == 0u);
+    BOOST_TEST(nabto_coap_block_offset(2, 5) == 1024u);
+    BOOST_TEST(nabto_coap_block_offset(NABTO_COAP_BLOCK_NUM_MAX, 6) == (size_t)0xFFFFFu * 1024u);
+    // At the very top of both fields, including the reserved size 7 that
+    // the parser rejects but the macro can still be handed.
+    BOOST_TEST(nabto_coap_block_offset(NABTO_COAP_BLOCK_NUM_MAX, 7) == (size_t)0xFFFFFu * 2048u);
+    BOOST_TEST(NABTO_COAP_BLOCK_OFFSET((2u << 4) | 5u) == 1024u);
+}
+
 /**
  * Audit L6: the option pre-scan stepped over the delta extension bytes
  * before checking they were there. A packet ending in the first option

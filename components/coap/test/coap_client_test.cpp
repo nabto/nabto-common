@@ -427,6 +427,44 @@ BOOST_AUTO_TEST_CASE(duplicate_block2_block_is_acked_and_ignored)
     BOOST_TEST(std::string((const char*)payload, payloadLength) == body);
 }
 
+// Audit N16: RFC 7959 section 2.2, the block size 7 "is reserved, i.e.,
+// MUST NOT be sent". The server rejects it on the way in with 4.00; the
+// client did not check it at all, so a server sending it had the client
+// reassemble 2048 byte blocks.
+BOOST_AUTO_TEST_CASE(response_with_reserved_block_size_is_reset)
+{
+    const std::string chunk(16, 'a');
+    TestClient c;
+    SentMessage req = c.sendRequest();
+    BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_CONTENT, req.messageId, req.token).block2(0, true, 7).payload(chunk).build()) == NABTO_COAP_CLIENT_STATUS_DECODE_ERROR);
+    BOOST_TEST(c.request->response == (struct nabto_coap_client_response*)NULL);
+
+    std::vector<SentMessage> sent = c.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_RST);
+}
+
+// Audit N16: state and the timeout stamp were advanced even when the
+// encoders returned NULL because the integrator's buffer was too small,
+// so the packet vanished. A CON recovered on its next retransmission; a
+// NON is never retransmitted, so its request waited out the full
+// configured timeout with nothing ever sent.
+BOOST_AUTO_TEST_CASE(request_too_large_for_the_send_buffer_fails)
+{
+    TestClient c;
+    nabto_coap_client_request_set_nonconfirmable(c.request);
+    nabto_coap_client_request_send(c.request);
+    BOOST_TEST(nabto_coap_client_get_next_event(&c.client, c.now) == NABTO_COAP_CLIENT_NEXT_EVENT_SEND);
+
+    uint8_t buffer[8]; // smaller than the 4 byte header plus an 8 byte token
+    void* conn = NULL;
+    BOOST_TEST(nabto_coap_client_create_packet(&c.client, c.now, buffer, buffer + sizeof(buffer), &conn) == (uint8_t*)NULL);
+
+    BOOST_TEST(c.runCallback());
+    BOOST_TEST(c.endHandlerCalls == 1u);
+    BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_DECODE_ERROR);
+}
+
 // Audit N13: RFC 7959 section 2.1, a Block option must not occur twice.
 // The client cannot tell which occurrence the server meant, so the
 // response is rejected and reset rather than reassembled from one of them.

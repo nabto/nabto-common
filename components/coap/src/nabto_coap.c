@@ -368,6 +368,11 @@ bool nabto_coap_token_equal(nabto_coap_token* t1, nabto_coap_token* t2)
     return (memcmp(t1->token, t2->token, t1->tokenLength) == 0);
 }
 
+size_t nabto_coap_block_offset(uint32_t blockNum, uint32_t szx)
+{
+    return (size_t)blockNum * nabto_coap_block_size_from_szx(szx);
+}
+
 bool nabto_coap_parse_variable_int(const uint8_t* bufferStart, const uint8_t* bufferEnd, uint8_t maxBytes, uint32_t* result)
 {
     size_t length;

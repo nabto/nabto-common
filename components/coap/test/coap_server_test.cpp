@@ -1004,6 +1004,34 @@ BOOST_AUTO_TEST_CASE(rst_for_sent_non_response_ends_the_request)
 }
 
 
+// Audit N16: the Block1 echo was gated on the option value being non
+// zero, but NUM=0/M=0/SZX=0 -- what a client sends with a 16 byte body in
+// one chunk -- encodes as 0, so that request got no echo and its client
+// could not tell the option had been understood (RFC 7959 section 2.5).
+BOOST_AUTO_TEST_CASE(single_chunk_block1_with_zero_option_is_echoed)
+{
+    const std::string chunk(16, 'a');
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xe801, "t1").block1(0, false, 0).payload(chunk).build());
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_EMPTY); // the empty ACK
+    BOOST_REQUIRE(s.request != NULL);
+
+    BOOST_REQUIRE(nabto_coap_server_response_set_payload(s.request, "ok", 2) == NABTO_COAP_ERROR_OK);
+    nabto_coap_server_response_set_code(s.request, NABTO_COAP_CODE_CONTENT);
+    BOOST_REQUIRE(nabto_coap_server_response_ready(s.request) == NABTO_COAP_ERROR_OK);
+    nabto_coap_server_request_free(s.request);
+    s.request = NULL;
+
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].hasBlock1);
+    BOOST_TEST(sent[0].block1 == blockOption(0, false, 0));
+    s.handlePacket(ackPacket(sent[0].messageId));
+    BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
 // Audit N13: RFC 7959 section 2.1, "Either Block option MUST NOT occur
 // more than once in a single message." The parser let the last occurrence
 // win. Both Block options are critical, and RFC 7252 section 5.4.5 says a
