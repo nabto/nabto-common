@@ -11,6 +11,7 @@ static const char* outOfResources = "Out of resources";
 static const char* wrongPayloadLength = "Wrong payload length";
 static const char* badBlockOption = "Bad block option";
 static const char* requestTooLarge = "Request entity too large";
+static const char* contentFormatChanged = "Content-Format changed";
 
 
 static struct nabto_coap_server_request* nabto_coap_server_handle_new_request(struct nabto_coap_server_requests* requests, struct nabto_coap_incoming_message* message, void* connection);
@@ -289,6 +290,27 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests
         return;
     }
 
+    // RFC 7959 section 2.3: "The Content-Format Option sent with the
+    // requests or responses MUST reflect the Content-Format of the entire
+    // body. If blocks of a request arrive at a server with mismatching
+    // Content-Format Options, the server MUST NOT assemble them into a
+    // single request." Checked before anything is appended. A later chunk
+    // that carries no Content-Format keeps what the first one declared:
+    // the option has to describe the whole body, not appear on every
+    // block, and clients differ on that.
+    if (message->hasContentFormat) {
+        if (request->hasContentFormat && request->contentFormat != message->contentFormat) {
+            nabto_coap_server_make_error_response(requests, request->connection, message, NABTO_COAP_CODE_REQUEST_ENTITY_INCOMPLETE, contentFormatChanged);
+            // User will never see this request, so we free for him
+            request->isFreed = true;
+            request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
+            nabto_coap_server_free_request(request);
+            return;
+        }
+        request->hasContentFormat = true;
+        request->contentFormat = message->contentFormat;
+    }
+
     if (message->hasBlock2) {
         // RFC 7959 section 2.4 early negotiation: the client states the
         // block size it wants, and with a fresh token per block, the block
@@ -376,11 +398,6 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests
             memcpy(request->payload, message->payload, message->payloadLength);
             request->payloadLength = message->payloadLength;
         }
-    }
-
-    if (message->hasContentFormat) {
-        request->hasContentFormat = true;
-        request->contentFormat = message->contentFormat;
     }
 
     if (message->type == NABTO_COAP_TYPE_CON && !request->hasBlock1Ack) {
