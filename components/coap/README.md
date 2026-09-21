@@ -94,8 +94,8 @@ until the application sets them.
   did not see: it is acknowledged again and otherwise ignored, so a lost
   ACK costs neither the body nor the transfer. A block leaving a gap is
   an error and ends the request.
-- Missing: early negotiation of the response block size, Size1 and
-  Size2.
+- Missing: early negotiation of the response block size. Size1, Size2
+  and ETag are deliberate deviations, see the design notes below.
 
 ### Server
 
@@ -106,8 +106,7 @@ until the application sets them.
   above `nabto_coap_server_limit_request_size`. A chunk that carries no
   Content-Format keeps the one the first chunk declared, since section
   2.3 asks the option to describe the whole body rather than to appear
-  on every block. The Block1 option is
-  echoed in the first response. A transfer on which no chunk has been
+  on every block. The Block1 option is echoed in the first response. A transfer on which no chunk has been
   heard for 64 s (`ACK_TIMEOUT` doubled `MAX_RETRANSMIT` + 1 times) is
   discarded, as section 2.5 allows; a chunk arriving after that gets
   4.08.
@@ -119,14 +118,15 @@ until the application sets them.
   is ignored, as section 2.4 requires. The requested block number counts
   in the client's block size, so the block served is derived from the
   byte offset, which also makes a fresh token per block work. A block at
-  or past the end of the body is a 4.00. The response is kept until the last block has been
-  ACKed. Which block is next is decided only by the client's Block2
+  or past the end of the body is a 4.00. The response is kept until the
+  last block has been ACKed. Which block is next is decided only by the client's Block2
   request; an ACK says that the block named by the id it carries
   arrived, so a duplicate ACK changes nothing. A transfer whose current
   block has been ACKed and which the client then stops asking for is
   discarded after 64 s, the same span as a Block1 transfer being
   received.
-- Missing: Size1 and Size2.
+- Missing: nothing beyond Size1, Size2 and ETag, which are deliberate
+  deviations; see the design notes below.
 
 ## RFC 7641, observe
 
@@ -194,6 +194,46 @@ will not retransmit the request. With separate responses the client
 must ACK the response, so the server only keeps the response state
 until that ACK arrives. The server therefore always sends application
 responses as separate responses.
+
+### Why there are no Size1, Size2 or ETag options
+
+None of the three is implemented, and none of them is a backlog item.
+
+RFC 7959 section 2.4 says the Block2 option *"SHOULD be used in
+conjunction with the ETag Option"*, and that a reassembling client
+*"MUST compare ETag Options"*, so that a representation changing between
+blocks is noticed rather than reassembled into a body that never
+existed. That cannot happen between our own peers:
+`nabto_coap_server_response_set_payload` copies the whole response body
+into one buffer, and the request owns that buffer until the last block
+has been ACKed, so every block of a transfer comes from the same
+representation by construction. What the missing option costs is that
+our client cannot detect the hazard against a server which does not have
+that property.
+
+Section 4 calls the size options *"elective, i.e., a client MUST be
+prepared for the server to ignore the size estimate request"*, and says
+that *"The end of a block-wise transfer is governed by the M bits in the
+Block options, not by exhausting the size estimates exchanged"*. Nothing
+in either direction depends on them, and a peer that sends them is
+unaffected: they are elective, so they are ignored.
+
+Two costs come with that, and neither is hidden:
+
+- Reassembly cannot pre-allocate. Each Block1 chunk on the server and
+  each Block2 block on the client allocates a buffer holding the body so
+  far plus the new chunk, so a body of *n* blocks costs *n* allocations
+  and grows quadratically in bytes copied. A Size1 or Size2 on the first
+  block would let either side allocate once. See "The limits are the
+  application's to set" for why the limits, rather than the growth
+  strategy, are what keep this from hurting.
+- The 4.13 Request Entity Too Large that
+  `nabto_coap_server_limit_request_size` produces carries no Size1,
+  although section 2.9.3 and RFC 7252 recommend one, so a client learns
+  that its body is too large but not what would fit. It can only retry
+  with a guess. The sibling hint in the same section, a 4.13 carrying a
+  smaller Block1 size, is about the block size rather than the body size
+  and is a different thing: the client takes that one.
 
 ### The request and observer limits are shared by every connection
 
