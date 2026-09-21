@@ -59,7 +59,7 @@ bodies, observers and response bodies can be bounded with
 - Message size limits; the size of the integrator's buffer decides.
 - `ACK_RANDOM_FACTOR`, `NSTART`, `PROBING_RATE` and `EXCHANGE_LIFETIME`
   bookkeeping. Message ids and tokens are sequential counters
-  starting from zero.
+  starting from zero, see the design notes below for the reasoning.
 - CoAP ping (an empty CON): the client answers with a RST as
   required, the server answers with 4.04 Not Found.
 - Piggybacked application responses on the server, see the design
@@ -180,6 +180,49 @@ layer that owns the connections, which knows who the peer is and can
 limit connections and requests per identity, and a well-behaved
 resource handler answers or fails requests promptly rather than
 holding them.
+
+### The message id counter is shared by every connection
+
+`nabto_coap_server_next_message_id` increments one counter in the
+`nabto_coap_server_requests` context, and one context is normally
+shared by every connection, so a single sequence of ids is spread
+across all of them. The ids it hands out are the ones on the
+responses the server sends, on NON error responses and on
+notifications.
+
+Matching an incoming message is per connection all the same. ACK and
+RST carry no token, so they are correlated with the message they
+answer by message id and endpoint (RFC 7252 section 4.4), and the
+library uses the `connection` pointer the integrator passes to
+`nabto_coap_server_handle_packet` as the endpoint:
+`nabto_coap_server_find_response` for an ACK, the observer scan
+beside it and `nabto_coap_server_handle_rst` each compare the
+connection as well as the id, and only against a message that is in
+flight. A peer on one connection can therefore neither acknowledge
+nor reset a request or a notification that belongs to another one,
+and it cannot reach one of its own before that message is on the
+wire either.
+
+RFC 7252 section 4.4 describes the shared counter as the simplest of
+the strategies for generating message ids, "a single Message ID
+variable, which is changed each time a new Confirmable or
+Non-confirmable message is sent regardless of the destination
+address or port", and notes that an endpoint "dealing with large
+numbers of transactions could keep multiple Message ID variables".
+
+What the shared counter leaves is that a client can predict the ids
+the device will use next, and that the gaps between the ids it sees
+tell it how many messages went to other clients in between. Both are
+accepted. The client and the server only ever run inside DTLS, where
+the sender of a record is the authenticated peer: section 4.4 asks
+for a randomized initial id "in order to make successful off-path
+attacks on the protocol less likely", and section 5.3.1 scopes the
+same advice for tokens to a client "sending a request without using
+Transport Layer Security". Closing the gap would take a counter per
+connection, which the server has nowhere to keep, as a connection is
+an opaque pointer it never owns; a random offset per connection would
+not close it, because the difference between two ids the client sees
+is the same with or without the offset.
 
 ### Route tree
 
