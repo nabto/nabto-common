@@ -8,7 +8,6 @@
 #include "nabto_coap.h"
 #include <stdint.h>
 #include <string.h>
-#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -115,8 +114,6 @@ void nabto_coap_server_limit_request_size(struct nabto_coap_server_requests* req
  * refused by the limit. Unlimited by default.
  */
 void nabto_coap_server_limit_observers(struct nabto_coap_server_requests* requests, size_t limit);
-
-#define NABTO_COAP_SERVER_LOG_TRACE(fmt, args) do { printf(fmt, args); } while(0);
 
 /**
  * Add resource handlers to a server
