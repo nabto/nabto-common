@@ -6,6 +6,7 @@
 #include <nn/string_map.h>
 
 const char* unhandledRequest = "Request unhandled";
+static const char* badBlockOption = "Bad block option";
 
 // Drop the current response payload, freeing it unless it is static.
 static void nabto_coap_server_response_release_payload(struct nabto_coap_server_request* request)
@@ -132,6 +133,9 @@ void nabto_coap_server_request_free(struct nabto_coap_server_request* request)
         // The user may have set a payload without ever calling response_ready.
         nabto_coap_server_response_release_payload(request);
         request->response.staticPayload = true;
+        // The synthetic error is not an answer to whatever block the
+        // client asked for, so the request's Block2 does not apply to it.
+        request->hasBlock2Request = false;
         nabto_coap_server_response_set_code(request, NABTO_COAP_CODE_INTERNAL_SERVER_ERROR);
         request->response.payload = (void*)unhandledRequest;
         request->response.payloadLength = strlen(unhandledRequest);
@@ -896,6 +900,50 @@ void nabto_coap_server_response_set_content_format(struct nabto_coap_server_requ
 
 }
 
+/**
+ * Apply the Block2 option the request carried (RFC 7959 section 2.4,
+ * early negotiation), now that the application has set the payload.
+ *
+ * Section 2.4: "A server MUST use the block size indicated or a smaller
+ * size", so a requested SZX below our own preference is adopted and one
+ * above it is ignored. The requested block number counts in the client's
+ * block size, which is then not necessarily the size we serve with, so
+ * the block to start at is derived from the byte offset rather than
+ * copied. Both sizes are powers of two and ours is never the larger, so
+ * that division is exact.
+ *
+ * A block at or past the end of the body gets the same 4.00 the
+ * later-block path gives (audit H1, sc-4811); RFC 7959 has no code of its
+ * own for it.
+ */
+static void nabto_coap_server_apply_block2_request(struct nabto_coap_server_request* request)
+{
+    struct nabto_coap_server_response* response = &request->response;
+    if (!request->hasBlock2Request) {
+        return;
+    }
+    request->hasBlock2Request = false;
+
+    uint32_t szx = NABTO_COAP_BLOCK_SIZE(request->block2Request);
+    if (szx < response->block2Size) {
+        response->block2Size = szx;
+    }
+
+    uint32_t offset = NABTO_COAP_BLOCK_OFFSET(request->block2Request);
+    if (offset != 0 && offset >= response->payloadLength) {
+        nabto_coap_server_response_release_payload(request);
+        response->staticPayload = true;
+        response->payload = (void*)badBlockOption;
+        response->payloadLength = strlen(badBlockOption);
+        response->hasContentFormat = false;
+        response->block2Current = 0;
+        nabto_coap_server_response_set_code(request, NABTO_COAP_CODE_BAD_REQUEST);
+        return;
+    }
+
+    response->block2Current = offset / (16u << response->block2Size);
+}
+
 nabto_coap_error nabto_coap_server_response_ready(struct nabto_coap_server_request* request)
 {
     if (request->connection == NULL) {
@@ -904,6 +952,7 @@ nabto_coap_error nabto_coap_server_response_ready(struct nabto_coap_server_reque
         //nabto_coap_server_free_request(request);
         return NABTO_COAP_ERROR_NO_CONNECTION;
     } else {
+        nabto_coap_server_apply_block2_request(request);
         request->state = NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE;
         request->response.sendNow = true;
         request->requests->notifyEvent(request->requests->userData);
