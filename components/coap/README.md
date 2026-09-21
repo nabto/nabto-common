@@ -88,9 +88,15 @@ until the application sets them.
   heard for 64 s (`ACK_TIMEOUT` doubled `MAX_RETRANSMIT` + 1 times) is
   discarded, as section 2.5 allows; a chunk arriving after that gets
   4.08.
-- Block2 serving with 512 byte blocks by default and late negotiation
-  (the client can ask for smaller blocks). A block past the end of the
-  body is a 4.00. The response is kept until the last block has been
+- Block2 serving with 512 byte blocks by default, and both early and
+  late negotiation: a Block2 option on the request itself states the
+  block size the client wants, and which block, and a Block2 option on
+  a later request can still ask for a smaller size. A requested size
+  below the default is adopted for the whole response and one above it
+  is ignored, as section 2.4 requires. The requested block number counts
+  in the client's block size, so the block served is derived from the
+  byte offset, which also makes a fresh token per block work. A block at
+  or past the end of the body is a 4.00. The response is kept until the last block has been
   ACKed. Which block is next is decided only by the client's Block2
   request; an ACK says that the block named by the id it carries
   arrived, so a duplicate ACK changes nothing. A transfer whose current

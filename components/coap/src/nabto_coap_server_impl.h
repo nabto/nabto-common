@@ -102,6 +102,13 @@ struct nabto_coap_server_request {
     bool hasBlock1Ack;
     uint32_t block1Ack;
 
+    // The Block2 option the request itself carried, if any (RFC 7959
+    // section 2.4 early negotiation). Kept until response_ready, because
+    // whether the block the client asked for exists depends on the
+    // payload the application sets.
+    bool hasBlock2Request;
+    uint32_t block2Request;
+
     // Deadline for the next Block1 chunk while the request is being
     // received (REQUEST state); the transfer is discarded when it
     // passes. Not used in the other states.

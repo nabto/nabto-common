@@ -289,6 +289,14 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests
         return;
     }
 
+    if (message->hasBlock2) {
+        // RFC 7959 section 2.4 early negotiation: the client states the
+        // block size it wants, and with a fresh token per block, the block
+        // it wants. Applied in nabto_coap_server_response_ready.
+        request->hasBlock2Request = true;
+        request->block2Request = message->block2;
+    }
+
     // RFC 7959 section 2.9.3: 4.13 Request Entity Too Large "can be
     // returned at any time by a server that does not currently have the
     // resources to store blocks for a block-wise request payload
