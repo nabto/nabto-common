@@ -162,6 +162,10 @@ struct nabto_coap_incoming_message {
     uint32_t block2;
     bool hasObserve;
     uint32_t observe;
+    // RFC 7959 section 2.1: "Either Block option MUST NOT occur more than
+    // once in a single message." Both are critical, so a repeat is
+    // answered rather than acted on with one of the values.
+    bool hasRepeatedBlockOption;
 };
 
 

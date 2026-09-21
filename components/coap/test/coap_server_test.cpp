@@ -1004,6 +1004,46 @@ BOOST_AUTO_TEST_CASE(rst_for_sent_non_response_ends_the_request)
 }
 
 
+// Audit N13: RFC 7959 section 2.1, "Either Block option MUST NOT occur
+// more than once in a single message." The parser let the last occurrence
+// win. Both Block options are critical, and RFC 7252 section 5.4.5 says a
+// repeated non-repeatable option "MUST be treated like an unrecognized
+// option", so it gets the same answer an unknown critical option does.
+BOOST_AUTO_TEST_CASE(repeated_block_option_gets_bad_option)
+{
+    const std::string chunk(16, 'a');
+    TestServer s;
+
+    // Two Block1 options in a CON.
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xe701, "t1").block1(0, true, 0).block1(9, false, 0).payload(chunk).build());
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_BAD_OPTION);
+    BOOST_TEST(sent[0].messageId == 0xe701);
+    BOOST_TEST(sent[0].payload == "Unsupported critical option");
+    BOOST_TEST(s.handlerCalls == 0u);
+    BOOST_TEST(s.requests.activeRequests == 0u);
+
+    // Two Block1 options in a NON.
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_NON, NABTO_COAP_CODE_POST, 0xe702, "t2").block1(0, true, 0).block1(9, false, 0).payload(chunk).build());
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_RST);
+    BOOST_TEST(sent[0].messageId == 0xe702);
+    BOOST_TEST(s.handlerCalls == 0u);
+
+    // Two Block2 options.
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xe703, "t3").block2(0, 5).block2(4, 5).build());
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_BAD_OPTION);
+    BOOST_TEST(sent[0].messageId == 0xe703);
+    BOOST_TEST(s.handlerCalls == 0u);
+    BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
 // Audit N12: RFC 7959 section 2.3, "If blocks of a request arrive at a
 // server with mismatching Content-Format Options, the server MUST NOT
 // assemble them into a single request." Every chunk simply overwrote what
