@@ -269,6 +269,25 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
         response->observe = message->observe;
     }
 
+    if (message->hasBlock2 && NABTO_COAP_BLOCK_OFFSET(message->block2) < response->payloadLength) {
+        // A block we already hold. The server retransmits a block whose
+        // ack it did not see, so this arrives while our request for the
+        // next block is in flight. Acknowledge it again -- otherwise the
+        // server keeps retransmitting -- and leave the body alone.
+        // Checked before the size limit, because counting a duplicate
+        // against the limit would fail a body that fits.
+        if (NABTO_COAP_BLOCK_OFFSET(message->block2) + message->payloadLength > response->payloadLength) {
+            // Overlaps the end, so it is not a copy of what we have and
+            // there is no way to place it.
+            nabto_coap_client_request_drop_response(request);
+            return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
+        }
+        if (message->type == NABTO_COAP_TYPE_CON) {
+            nabto_coap_client_send_ack(client, message, connection);
+        }
+        return NABTO_COAP_CLIENT_STATUS_OK;
+    }
+
     // Bound the response body, whether it arrives as Block2 blocks or
     // in a single packet.
     if (response->payloadLength + message->payloadLength > client->settings.maxResponsePayload) {
@@ -279,6 +298,8 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
     if (message->hasBlock2) {
         size_t offset = NABTO_COAP_BLOCK_OFFSET(message->block2);
         if (offset != response->payloadLength) {
+            // A gap: blocks before this one are missing. Duplicates were
+            // dealt with above, so this can only be a hole in the body.
             nabto_coap_client_request_drop_response(request);
             return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
         }

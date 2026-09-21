@@ -85,7 +85,11 @@ until the application sets them.
   block. `nabto_coap_client_limit_response_size` bounds the
   reassembled body. A request fetching a block other than the first
   carries no request body and no Block1 option, as section 3.3
-  requires; the body was handed over in the first exchange.
+  requires; the body was handed over in the first exchange. A block
+  already reassembled is a retransmission of one whose ACK the server
+  did not see: it is acknowledged again and otherwise ignored, so a lost
+  ACK costs neither the body nor the transfer. A block leaving a gap is
+  an error and ends the request.
 - Missing: early negotiation of the response block size, Size1 and
   Size2.
 
