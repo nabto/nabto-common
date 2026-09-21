@@ -58,7 +58,7 @@ enum nabto_coap_client_block1_result {
  */
 static enum nabto_coap_client_block1_result nabto_coap_client_block1_advance(struct nabto_coap_client_request* request, uint32_t block1)
 {
-    size_t blockSize = (16u << request->block1Size);
+    size_t blockSize = nabto_coap_block_size_from_szx(request->block1Size);
     uint32_t current = (uint32_t)(request->block1Offset / blockSize);
     uint32_t num = NABTO_COAP_BLOCK_NUM(block1);
 
@@ -463,9 +463,13 @@ enum nabto_coap_client_status nabto_coap_client_handle_packet(struct nabto_coap_
     }
 
     // RFC 7959 section 2.1: "Either Block option MUST NOT occur more than
-    // once in a single message." The response cannot be acted on, so
-    // reject it and, when it is a message that can be reset, say so.
-    if (message.hasRepeatedBlockOption) {
+    // once in a single message." Section 2.2: the block size 7 "is
+    // reserved, i.e., MUST NOT be sent". Neither response can be acted
+    // on, so reject it and, when it is a message that can be reset, say
+    // so. The server rejects both on the way in as well.
+    if (message.hasRepeatedBlockOption ||
+        (message.hasBlock1 && NABTO_COAP_BLOCK_SIZE(message.block1) == 7) ||
+        (message.hasBlock2 && NABTO_COAP_BLOCK_SIZE(message.block2) == 7)) {
         if (message.type == NABTO_COAP_TYPE_CON || message.type == NABTO_COAP_TYPE_NON) {
             client->needSendRst = true;
             client->messageIdRst = message.messageId;
@@ -623,7 +627,7 @@ uint8_t* nabto_coap_client_request_create_packet(struct nabto_coap_client_reques
     // that reads it.
     bool fetchingFurtherBlock2 = request->hasBlock2 && NABTO_COAP_BLOCK_NUM(request->block2) > 0;
 
-    size_t blockSize = (16u << request->block1Size);
+    size_t blockSize = nabto_coap_block_size_from_szx(request->block1Size);
     size_t payloadOffset = request->block1Offset;
     if (!fetchingFurtherBlock2 && payloadOffset < request->payloadLength) {
         size_t payloadRestLength = request->payloadLength - payloadOffset;
@@ -648,6 +652,17 @@ uint8_t* nabto_coap_client_request_create_packet(struct nabto_coap_client_reques
             payloadRestLength = blockSize;
         }
         ptr = nabto_coap_encode_payload(payloadRestStart, payloadRestLength, ptr, end);
+    }
+
+    if (ptr == NULL) {
+        // The integrator's buffer could not hold the packet, so nothing
+        // went out. Advancing the state here would lose the block
+        // silently and, for a NON, the whole request: there is no
+        // retransmission to recover it. Fail it instead, so the caller
+        // hears about a buffer too small for its own requests.
+        request->status = NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
+        request->state = NABTO_COAP_CLIENT_REQUEST_STATE_DONE_CALLBACK;
+        return NULL;
     }
 
     struct nabto_coap_client* client = request->client;

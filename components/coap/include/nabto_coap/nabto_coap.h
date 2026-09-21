@@ -2,6 +2,7 @@
 #define _NABTO_COAP_H_
 
 #include <stdint.h>
+#include <stddef.h>
 #include <string.h>
 #include <stdbool.h>
 
@@ -176,9 +177,31 @@ struct nabto_coap_incoming_message {
 
 #define NABTO_COAP_BLOCK_SIZE(value) ((value) & 0x7u)
 #define NABTO_COAP_BLOCK_SIZE_ABSOLUTE(value) (16u << NABTO_COAP_BLOCK_SIZE(value))
+
+/**
+ * The block size in bytes of an SZX, the low three bits of a Block
+ * option. RFC 7959 section 2.2: 0 to 6 mean 16 to 1024 bytes, and 7 is
+ * reserved and rejected before it reaches here.
+ *
+ * Distinct from NABTO_COAP_BLOCK_SIZE_ABSOLUTE, which takes a whole Block
+ * option value. Handing that macro a bare SZX works only because its mask
+ * is then a no-op, which is how the two spellings kept drifting apart.
+ */
+static inline size_t nabto_coap_block_size_from_szx(uint32_t szx)
+{
+    return (size_t)16u << (szx & 0x7u);
+}
 #define NABTO_COAP_BLOCK_NUM(value) ((value) >> 4)
 #define NABTO_COAP_BLOCK_MORE(value) (((value) & 0xF) >> 3)
-#define NABTO_COAP_BLOCK_OFFSET(value) (NABTO_COAP_BLOCK_SIZE_ABSOLUTE(value) * NABTO_COAP_BLOCK_NUM(value))
+/**
+ * Byte offset of a block, block number times block size. NUM is at most
+ * 20 bits and SZX at most 7 (2048 byte blocks), so the product is below
+ * 2^31 and fits size_t on every target; it is computed in size_t so no
+ * intermediate is narrower than the result.
+ */
+size_t nabto_coap_block_offset(uint32_t blockNum, uint32_t szx);
+
+#define NABTO_COAP_BLOCK_OFFSET(value) nabto_coap_block_offset(NABTO_COAP_BLOCK_NUM(value), NABTO_COAP_BLOCK_SIZE(value))
 
 
 /**

@@ -72,8 +72,6 @@ struct nabto_coap_server_response {
     bool hasContentFormat;
     uint16_t contentFormat;
 
-    bool hasBlock2;
-
     uint8_t* payload;
     size_t payloadLength;
     bool staticPayload;
@@ -99,6 +97,7 @@ struct nabto_coap_server_request {
 
     size_t payloadLength;
 
+    bool hasBlock1; // the request carried a Block1 option
     bool hasBlock1Ack;
     uint32_t block1Ack;
 

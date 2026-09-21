@@ -57,7 +57,10 @@ until the application sets them.
   no API for Location-Path, Location-Query or Size1.
 - Resource discovery (`/.well-known/core`, RFC 6690), multicast and
   `coap://` URI handling.
-- Message size limits; the size of the integrator's buffer decides.
+- Message size limits; the size of the integrator's buffer decides. A
+  packet that does not fit the buffer the integrator offers fails the
+  client request rather than being silently dropped, since a NON has no
+  retransmission to recover it.
 - `ACK_RANDOM_FACTOR`, `NSTART`, `PROBING_RATE` and `EXCHANGE_LIFETIME`
   bookkeeping. Message ids and tokens are sequential counters
   starting from zero, see the design notes below for the reasoning.
@@ -82,7 +85,8 @@ until the application sets them.
   token alone, so it arrives while the next chunk is in flight.
 - Block2 reassembly of response bodies at the block size chosen by
   the server, with checks of the offset and of the length of each
-  block. `nabto_coap_client_limit_response_size` bounds the
+  block, and of the reserved block size 7, which section 2.2 says must
+  not be sent. `nabto_coap_client_limit_response_size` bounds the
   reassembled body. A request fetching a block other than the first
   carries no request body and no Block1 option, as section 3.3
   requires; the body was handed over in the first exchange. A block

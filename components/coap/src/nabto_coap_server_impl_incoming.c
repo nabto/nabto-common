@@ -343,6 +343,7 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests
     }
 
     if (message->hasBlock1) {
+        request->hasBlock1 = true;
         uint32_t offset = NABTO_COAP_BLOCK_OFFSET(message->block1);
         if (request->payloadLength != offset) {
             nabto_coap_server_make_error_response(requests, request->connection, message, NABTO_COAP_CODE_REQUEST_ENTITY_INCOMPLETE, NULL);
@@ -554,7 +555,7 @@ void nabto_coap_server_handle_ack(struct nabto_coap_server_requests* requests, s
     // duplicate ACK -- which is ordinary, a client acks every copy of a
     // CON it receives -- recomputes the same answer instead of walking
     // the response forward and ending it early.
-    size_t blockSize = (16 << response->block2Size);
+    size_t blockSize = nabto_coap_block_size_from_szx(response->block2Size);
     if ((size_t)(response->block2Current + 1) * blockSize >= response->payloadLength) {
         request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
         nabto_coap_server_free_request(request);

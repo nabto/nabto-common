@@ -139,10 +139,6 @@ void nabto_coap_server_request_free(struct nabto_coap_server_request* request)
         nabto_coap_server_response_set_code(request, NABTO_COAP_CODE_INTERNAL_SERVER_ERROR);
         request->response.payload = (void*)unhandledRequest;
         request->response.payloadLength = strlen(unhandledRequest);
-        if (strlen(unhandledRequest) > (16u << request->response.block2Size)) {
-            request->response.hasBlock2 = true;
-            request->response.block2Current = 0;
-        }
         nabto_coap_server_response_ready(request);
     }
     request->isFreed = true;
@@ -492,7 +488,7 @@ static uint8_t* nabto_coap_server_send_in_response_state(struct nabto_coap_serve
         currentOption = NABTO_COAP_OPTION_CONTENT_FORMAT;
     }
 
-    size_t blockSize = (16 << response->block2Size);
+    size_t blockSize = nabto_coap_block_size_from_szx(response->block2Size);
     size_t payloadOffset = (response->block2Current * blockSize);
     // The incoming path rejects blocks past the payload; never read
     // past it here either.
@@ -515,8 +511,11 @@ static uint8_t* nabto_coap_server_send_in_response_state(struct nabto_coap_serve
         currentOption = NABTO_COAP_OPTION_BLOCK2;
     }
 
-    // we should send a block1 option back if the request had block1 options and this is the first packet in the response.
-    if (request->block1Ack > 0 && payloadOffset == 0) {
+    // Echo the Block1 option on the first packet of the response if the
+    // request used Block1. Gated on hasBlock1 rather than on block1Ack
+    // being non zero: the perfectly legal NUM=0/M=0/SZX=0 a client sends
+    // with a 16 byte body encodes as the value 0.
+    if (request->hasBlock1 && payloadOffset == 0) {
         uint16_t optionDelta = NABTO_COAP_OPTION_BLOCK1 - currentOption;
         ptr = nabto_coap_encode_varint_option(optionDelta, request->block1Ack, ptr, end);
         currentOption = NABTO_COAP_OPTION_BLOCK1;
@@ -886,10 +885,6 @@ nabto_coap_error nabto_coap_server_response_set_payload(struct nabto_coap_server
     }
     memcpy(request->response.payload, data, dataSize);
     request->response.payloadLength = dataSize;
-    if (dataSize > (16u << request->response.block2Size)) {
-        request->response.hasBlock2 = true;
-        request->response.block2Current = 0;
-    }
     return NABTO_COAP_ERROR_OK;
 }
 
@@ -941,7 +936,7 @@ static void nabto_coap_server_apply_block2_request(struct nabto_coap_server_requ
         return;
     }
 
-    response->block2Current = offset / (16u << response->block2Size);
+    response->block2Current = (uint32_t)(offset / nabto_coap_block_size_from_szx(response->block2Size));
 }
 
 nabto_coap_error nabto_coap_server_response_ready(struct nabto_coap_server_request* request)
