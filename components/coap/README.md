@@ -70,13 +70,22 @@ until the application sets them.
 
 ### Client
 
-- Block1 for request bodies, fixed 512 byte blocks (SZX 5).
+- Block1 for request bodies, 512 byte blocks (SZX 5) to begin with.
+  Progress is a byte offset rather than a block count, so a smaller
+  block size echoed in a 2.31 Continue is adopted for the rest of the
+  transfer (section 2.5) and a 4.13 carrying a smaller size restarts the
+  body at block zero, once (section 2.9.3). A size larger than the one
+  in use is never adopted, nor is one that would push the block number
+  past its 20 bit field. A 2.31 Continue repeating a chunk already
+  acknowledged is ignored rather than treated as an error: the server
+  resends it for a retransmitted chunk, and responses are matched by
+  token alone, so it arrives while the next chunk is in flight.
 - Block2 reassembly of response bodies at the block size chosen by
   the server, with checks of the offset and of the length of each
   block. `nabto_coap_client_limit_response_size` bounds the
   reassembled body.
 - Missing: early negotiation of the response block size, Size1 and
-  Size2, using a 4.13 as a hint to switch to smaller blocks.
+  Size2.
 
 ### Server
 

@@ -18,6 +18,78 @@ static uint32_t nabto_coap_client_ack_timeout(struct nabto_coap_client* client, 
 
 static uint16_t nabto_coap_client_next_message_id(struct nabto_coap_client* client);
 
+/**
+ * Take the block size the server asked for. RFC 7959 section 2.5: "the
+ * client SHOULD heed the preference indicated and, for all further
+ * blocks, use the block size preferred by the server or a smaller one" --
+ * so a smaller size is adopted and a larger one ignored. Only ever
+ * shrinking is also what keeps block1Offset a multiple of the size in
+ * force, which is what makes the block number below exact. A size small
+ * enough to push the block number past its 20 bit field is refused
+ * rather than encoded as a malformed option.
+ *
+ * @return true if the size was adopted.
+ */
+static bool nabto_coap_client_block1_adopt_size(struct nabto_coap_client_request* request, uint32_t szx)
+{
+    if (szx >= request->block1Size) {
+        return false;
+    }
+    if ((request->payloadLength >> (szx + 4)) > NABTO_COAP_BLOCK_NUM_MAX) {
+        return false;
+    }
+    request->block1Size = szx;
+    return true;
+}
+
+enum nabto_coap_client_block1_result {
+    NABTO_COAP_CLIENT_BLOCK1_ADVANCED, // the chunk in flight was acknowledged
+    NABTO_COAP_CLIENT_BLOCK1_STALE,    // a repeat for a chunk already acknowledged
+    NABTO_COAP_CLIENT_BLOCK1_BAD       // a chunk we never sent
+};
+
+/**
+ * A success response carrying a Block1 option acknowledges one chunk of
+ * the request body. The server echoes the block number it received with
+ * the block size it wants used from here (RFC 7959 section 2.5, figure
+ * 3), so the number counts in the size the chunk was sent with, not in
+ * the one the response asks for: the offset advances by what was sent,
+ * and only then is a smaller size adopted.
+ */
+static enum nabto_coap_client_block1_result nabto_coap_client_block1_advance(struct nabto_coap_client_request* request, uint32_t block1)
+{
+    size_t blockSize = (16u << request->block1Size);
+    uint32_t current = (uint32_t)(request->block1Offset / blockSize);
+    uint32_t num = NABTO_COAP_BLOCK_NUM(block1);
+
+    if (num < current) {
+        // The server resends its 2.31 Continue for a retransmitted chunk,
+        // and responses are matched by token alone, so a Continue for an
+        // earlier chunk arrives while the next one is in flight.
+        return NABTO_COAP_CLIENT_BLOCK1_STALE;
+    }
+    if (num > current) {
+        return NABTO_COAP_CLIENT_BLOCK1_BAD;
+    }
+
+    size_t rest = request->payloadLength - request->block1Offset;
+    request->block1Offset += (rest > blockSize) ? blockSize : rest;
+
+    nabto_coap_client_block1_adopt_size(request, NABTO_COAP_BLOCK_SIZE(block1));
+    return NABTO_COAP_CLIENT_BLOCK1_ADVANCED;
+}
+
+/**
+ * Queue the next packet of this request: another Block1 chunk, another
+ * Block2 block, or the transfer restarted at block zero.
+ */
+static void nabto_coap_client_request_send_again(struct nabto_coap_client_request* request)
+{
+    request->state = NABTO_COAP_CLIENT_REQUEST_STATE_SEND_REQUEST;
+    request->messageId = nabto_coap_client_next_message_id(request->client);
+    request->retransmissions = 0;
+}
+
 /********************************************************************
  * Implementation of functions used from the coap client integrator *
  ********************************************************************/
@@ -244,12 +316,40 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
     }
 
     if (message->hasBlock1) {
-        request->block1Current += 1;
-        if (request->block1Current * NABTO_COAP_BLOCK_SIZE_ABSOLUTE(request->block1Size) < request->payloadLength) {
-            request->state = NABTO_COAP_CLIENT_REQUEST_STATE_SEND_REQUEST;
-            request->messageId = nabto_coap_client_next_message_id(client);
-            request->retransmissions = 0;
+        // RFC 7959 section 2.9.3: "a 4.13 response with a smaller SZX in
+        // its Block1 Option than requested is a hint to try a smaller
+        // SZX". The server keeps nothing of a transfer it refused, so the
+        // body has to go again from block zero. Once only, or a server
+        // that answers 4.13 to everything would loop us.
+        if (message->code == NABTO_COAP_CODE_REQUEST_ENTITY_TOO_LARGE &&
+            !request->block1Restarted &&
+            nabto_coap_client_block1_adopt_size(request, NABTO_COAP_BLOCK_SIZE(message->block1)))
+        {
+            request->block1Restarted = true;
+            request->block1Offset = 0;
+            nabto_coap_client_request_send_again(request);
             return NABTO_COAP_CLIENT_STATUS_OK;
+        }
+
+        // Only a success acknowledges a chunk. An error ends the exchange
+        // whatever Block1 it echoes.
+        if ((message->code >> 5) == 2) {
+            switch (nabto_coap_client_block1_advance(request, message->block1)) {
+                case NABTO_COAP_CLIENT_BLOCK1_STALE:
+                    // The chunk in flight is still in flight; nothing to do.
+                    return NABTO_COAP_CLIENT_STATUS_OK;
+                case NABTO_COAP_CLIENT_BLOCK1_BAD:
+                    nabto_coap_client_request_drop_response(request);
+                    return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
+                case NABTO_COAP_CLIENT_BLOCK1_ADVANCED:
+                    break;
+            }
+
+            if (request->block1Offset < request->payloadLength) {
+                // More of the body to hand over before there is a response.
+                nabto_coap_client_request_send_again(request);
+                return NABTO_COAP_CLIENT_STATUS_OK;
+            }
         }
     }
 
@@ -257,17 +357,12 @@ enum nabto_coap_client_status nabto_coap_client_parse_and_handle_response(struct
         if (message->type == NABTO_COAP_TYPE_CON) {
             nabto_coap_client_send_ack(client, message, connection);
         }
-        request->state = NABTO_COAP_CLIENT_REQUEST_STATE_SEND_REQUEST;
-        request->messageId = nabto_coap_client_next_message_id(client);
-        request->retransmissions = 0;
-    } else if (message->hasBlock1 && message->code == NABTO_COAP_CODE_CONTINUE) {
-        request->block1Current += 1;
-        if (request->block1Current * NABTO_COAP_BLOCK_SIZE_ABSOLUTE(request->block1Size) < request->payloadLength) {
-            request->state = NABTO_COAP_CLIENT_REQUEST_STATE_SEND_REQUEST;
-            request->messageId = nabto_coap_client_next_message_id(client);
-            request->retransmissions = 0;
-        }
+        nabto_coap_client_request_send_again(request);
     } else {
+        // The body is sent and the response is whole, so this is the end
+        // of the exchange. A 2.31 Continue here is a server that asked for
+        // more of a body it already has; it is handed to the caller as it
+        // stands rather than turned into an error of our own.
         if (message->type == NABTO_COAP_TYPE_CON) {
             nabto_coap_client_send_ack(client, message, connection);
         }
@@ -500,19 +595,20 @@ uint8_t* nabto_coap_client_request_create_packet(struct nabto_coap_client_reques
         currentOption = NABTO_COAP_OPTION_BLOCK2;
     }
 
-    size_t blockSize = (16 << request->block1Size);
-    size_t payloadOffset = (request->block1Current * blockSize);
+    size_t blockSize = (16u << request->block1Size);
+    size_t payloadOffset = request->block1Offset;
     if (payloadOffset < request->payloadLength) {
         size_t payloadRestLength = request->payloadLength - payloadOffset;
 
-        if (request->payloadLength > (16u << request->block1Size)) {
+        if (request->payloadLength > blockSize) {
             // add block1 option
             uint32_t blockMore = 1;
             if (payloadRestLength <= blockSize) {
                 blockMore = 0;
             }
 
-            uint32_t blockOption = (request->block1Current << 4) + (blockMore << 3) + request->block1Size;
+            uint32_t blockNum = (uint32_t)(payloadOffset / blockSize);
+            uint32_t blockOption = (blockNum << 4) + (blockMore << 3) + request->block1Size;
 
             uint16_t optionDelta = NABTO_COAP_OPTION_BLOCK1 - currentOption;
             ptr = nabto_coap_encode_varint_option(optionDelta, blockOption, ptr, end);
@@ -523,9 +619,7 @@ uint8_t* nabto_coap_client_request_create_packet(struct nabto_coap_client_reques
         if (payloadRestLength > blockSize) {
             payloadRestLength = blockSize;
         }
-        if (payloadOffset < request->payloadLength) {
-            ptr = nabto_coap_encode_payload(payloadRestStart, payloadRestLength, ptr, end);
-        }
+        ptr = nabto_coap_encode_payload(payloadRestStart, payloadRestLength, ptr, end);
     }
 
     struct nabto_coap_client* client = request->client;
@@ -690,6 +784,8 @@ struct nabto_coap_client_request* nabto_coap_client_request_new(struct nabto_coa
     request->endHandlerUserData = endHandlerUserData;
 
     request->block1Size = 5; // 512 byte blocks as default. 16 * 2^5.
+    request->block1Offset = 0;
+    request->block1Restarted = false;
     request->connection = connection;
 
     return request;

@@ -50,8 +50,14 @@ struct nabto_coap_client_request {
     uint8_t* payload;
     size_t payloadLength;
 
-    uint32_t block1Size; // (16 << block1size) is the actual block size.
-    uint32_t block1Current;
+    uint32_t block1Size; // SZX; (16 << block1Size) is the actual block size.
+    // How much of the body the server has acknowledged, in bytes rather
+    // than in blocks, so that adopting a smaller block size mid transfer
+    // (RFC 7959 section 2.5) does not change the unit progress is kept in.
+    size_t block1Offset;
+    // The section 2.9.3 hint in a 4.13 restarts the transfer at block
+    // zero, and is taken at most once.
+    bool block1Restarted;
 
     bool hasBlock2;
     uint32_t block2;
