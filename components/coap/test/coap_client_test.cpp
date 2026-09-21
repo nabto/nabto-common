@@ -347,6 +347,42 @@ BOOST_AUTO_TEST_CASE(request_entity_too_large_with_a_smaller_szx_restarts_once)
     BOOST_TEST(nabto_coap_client_response_get_code(nabto_coap_client_request_get_response(c.request)) == 413);
 }
 
+// Audit N15: RFC 7959 section 3.3 annotates the combined example with
+// "(no payload for requests with Block2 with NUM != 0)". Whether the body
+// went out again was decided only by where the Block1 offset had reached,
+// so it was right by accident for a body that went through Block1 and
+// wrong for one that fit in a single block: that body, and its
+// Content-Format, were repeated on every follow-up request.
+BOOST_AUTO_TEST_CASE(block2_followup_request_carries_no_request_body)
+{
+    const std::string body = "request body";
+    const std::string response(32, 'r'); // two 16 byte blocks
+    TestClient c(NABTO_COAP_METHOD_POST, body);
+    nabto_coap_client_request_set_content_format(c.request, 50);
+
+    SentMessage req = c.sendRequest();
+    BOOST_TEST(req.payload == body);
+    BOOST_TEST(!req.hasBlock1);
+
+    BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_ACK, NABTO_COAP_CODE_CONTENT, req.messageId, req.token).block2(0, true, 0).payload(response.substr(0, 16)).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+
+    std::vector<SentMessage> sent = c.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].hasBlock2);
+    BOOST_TEST(sent[0].block2 == blockOption(1, false, 0));
+    BOOST_TEST(sent[0].payload.empty());
+    BOOST_TEST(!sent[0].hasBlock1);
+
+    BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_ACK, NABTO_COAP_CODE_CONTENT, sent[0].messageId, req.token).block2(1, false, 0).payload(response.substr(16)).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+    BOOST_TEST(c.runCallback());
+    BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_OK);
+
+    const uint8_t* payload;
+    size_t payloadLength;
+    BOOST_REQUIRE(nabto_coap_client_response_get_payload(nabto_coap_client_request_get_response(c.request), &payload, &payloadLength));
+    BOOST_TEST(std::string((const char*)payload, payloadLength) == response);
+}
+
 // Audit N13: RFC 7959 section 2.1, a Block option must not occur twice.
 // The client cannot tell which occurrence the server meant, so the
 // response is rejected and reset rather than reassembled from one of them.
