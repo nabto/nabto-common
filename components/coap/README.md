@@ -81,9 +81,13 @@ until the application sets them.
 ### Server
 
 - Block1 reassembly with 2.31 Continue for each chunk; 4.08 Request
-  Entity Incomplete on a gap, 4.00 Bad Request on a chunk of the
-  wrong length or the reserved SZX 7, 4.13 Request Entity Too Large
-  above `nabto_coap_server_limit_request_size`. The Block1 option is
+  Entity Incomplete on a gap or on a chunk whose Content-Format differs
+  from the one the transfer started with, 4.00 Bad Request on a chunk of
+  the wrong length or the reserved SZX 7, 4.13 Request Entity Too Large
+  above `nabto_coap_server_limit_request_size`. A chunk that carries no
+  Content-Format keeps the one the first chunk declared, since section
+  2.3 asks the option to describe the whole body rather than to appear
+  on every block. The Block1 option is
   echoed in the first response. A transfer on which no chunk has been
   heard for 64 s (`ACK_TIMEOUT` doubled `MAX_RETRANSMIT` + 1 times) is
   discarded, as section 2.5 allows; a chunk arriving after that gets

@@ -85,6 +85,15 @@ class RequestBuilder {
         return *this;
     }
 
+    // Option 12, so it has to be added before block2 (23) and block1 (27).
+    RequestBuilder& contentFormat(uint16_t format)
+    {
+        ptr_ = nabto_coap_encode_varint_option(NABTO_COAP_OPTION_CONTENT_FORMAT - currentOption_, format, ptr_, end());
+        BOOST_REQUIRE(ptr_ != NULL);
+        currentOption_ = NABTO_COAP_OPTION_CONTENT_FORMAT;
+        return *this;
+    }
+
     RequestBuilder& block1(uint32_t num, bool more, uint32_t szx)
     {
         ptr_ = nabto_coap_encode_varint_option(NABTO_COAP_OPTION_BLOCK1 - currentOption_, blockOption(num, more, szx), ptr_, end());
@@ -994,6 +1003,57 @@ BOOST_AUTO_TEST_CASE(rst_for_sent_non_response_ends_the_request)
     BOOST_TEST(s.requests.activeRequests == 0u);
 }
 
+
+// Audit N12: RFC 7959 section 2.3, "If blocks of a request arrive at a
+// server with mismatching Content-Format Options, the server MUST NOT
+// assemble them into a single request." Every chunk simply overwrote what
+// the previous one recorded, so the handler was told the format of the
+// last chunk and given a body whose earlier bytes were declared to be
+// something else.
+BOOST_AUTO_TEST_CASE(block1_chunks_with_mismatching_content_format_are_rejected)
+{
+    const std::string chunk(16, 'a');
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xe601, "t1").contentFormat(50).block1(0, true, 0).payload(chunk).build());
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTINUE);
+    BOOST_TEST(s.requests.activeRequests == 1u);
+
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xe602, "t1").contentFormat(0).block1(1, false, 0).payload(chunk).build());
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_REQUEST_ENTITY_INCOMPLETE);
+    BOOST_TEST(sent[0].messageId == 0xe602);
+    BOOST_TEST(sent[0].payload == "Content-Format changed");
+    BOOST_TEST(s.handlerCalls == 0u);
+    BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
+// Section 2.3 requires the option to reflect the whole body, not to be
+// repeated on every block, so a later chunk that carries none keeps what
+// the first one declared.
+BOOST_AUTO_TEST_CASE(block1_content_format_from_the_first_chunk_is_kept)
+{
+    const std::string chunk(16, 'a');
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xe611, "t1").contentFormat(50).block1(0, true, 0).payload(chunk).build());
+    BOOST_TEST(s.drain().size() == 1u);
+
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0xe612, "t1").block1(1, false, 0).payload(chunk).build());
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_EMPTY);
+    BOOST_REQUIRE(s.handlerCalls == 1u);
+    BOOST_REQUIRE(s.request != NULL);
+    BOOST_TEST(nabto_coap_server_request_get_content_format(s.request) == 50);
+    void* payload;
+    size_t payloadLength;
+    BOOST_TEST(nabto_coap_server_request_get_payload(s.request, &payload, &payloadLength));
+    BOOST_TEST(payloadLength == 2 * chunk.size());
+    s.respondAndFinish(NABTO_COAP_CODE_CONTENT);
+}
 
 // Audit N6 (sc-4863): RFC 7959 section 2.4 lets a client state the block
 // size it wants, and the block it wants, on the request itself ("early
