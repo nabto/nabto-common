@@ -27,7 +27,8 @@ bodies, observers and response bodies can be bounded with
 `nabto_coap_server_limit_requests`,
 `nabto_coap_server_limit_request_size`,
 `nabto_coap_server_limit_observers` and
-`nabto_coap_client_limit_response_size`.
+`nabto_coap_client_limit_response_size`, all of which are unlimited
+until the application sets them.
 
 ## RFC 7252, CoAP core
 
@@ -181,6 +182,36 @@ limit connections and requests per identity, and a well-behaved
 resource handler answers or fails requests promptly rather than
 holding them.
 
+### The limits are the application's to set
+
+`nabto_coap_server_limit_requests`,
+`nabto_coap_server_limit_request_size`,
+`nabto_coap_server_limit_observers` and
+`nabto_coap_client_limit_response_size` all start at `SIZE_MAX`, so a
+server or client whose application calls none of them is bounded only
+by the allocator. The library keeps that default because it cannot
+pick the numbers: it has no static buffers, every byte comes from the
+application's `nn_allocator`, and how much of it a coap server may
+take, how large a request body an application expects and how many
+observers a device serves are properties of the product rather than of
+the protocol. An application on a device therefore sets all four at
+startup; that is the one place where the numbers make sense.
+
+Two costs follow the limits rather than being bounded on their own. A
+block-wise body is reassembled one chunk at a time: each Block1 chunk
+on the server, and each Block2 block on the client, allocates a buffer
+holding the body received so far plus the new chunk and copies the old
+body into it, so a body of *n* blocks costs *n* allocations and grows
+quadratically in bytes copied. With 512 byte blocks and a body kept to
+`nabto_coap_server_limit_request_size` or
+`nabto_coap_client_limit_response_size` that is a handful of chunks; it
+is the limit, not the way the buffer grows, which keeps a large body
+from hurting. Likewise `nabto_coap_server_resource_notify` copies the
+payload once per observer, plus once more for an observer which
+already has a notification in flight, so the peak cost of one
+notification is the payload times the observers, and
+`nabto_coap_server_limit_observers` is what bounds it.
+
 ### Route tree
 
 The resources of a server form a route tree of path segments; a
@@ -200,7 +231,10 @@ node holds one handler per method:
 The tree is built by `nabto_coap_server_add_resource` from a NULL
 terminated segment array, e.g. `{ "iam", "users", "{user}", NULL }`,
 and is represented by `struct nabto_coap_router_node` in
-`src/nabto_coap_server_impl.h`.
+`src/nabto_coap_server_impl.h`. A node holds at most one parameter, so
+a segment starting with `{` has to be a complete `{name}` and has to
+carry the same name as a parameter already on that node; anything else
+is `NABTO_COAP_ERROR_INVALID_PARAMETER`.
 
 ## Not implemented at all
 
