@@ -363,6 +363,14 @@ class TestServer {
     size_t allocationsBefore_;
 };
 
+// The route tree tests never dispatch a request, they only build
+// resources.
+void unusedHandler(struct nabto_coap_server_request* request, void* userData)
+{
+    (void)request;
+    (void)userData;
+}
+
 } // namespace
 
 BOOST_AUTO_TEST_SUITE(coap_server)
@@ -1488,6 +1496,37 @@ BOOST_AUTO_TEST_CASE(ack_for_unsent_response_is_ignored)
 
     s.handlePacket(ackPacket(responseId));
     BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
+// A parameter segment is written {name}. A segment which only looks
+// like the start of one has no name to copy, so it is refused instead
+// of being run through the arithmetic of a well formed parameter.
+BOOST_AUTO_TEST_CASE(malformed_parameter_segment_is_rejected)
+{
+    size_t allocationsBefore = liveAllocations;
+    struct nabto_coap_server server;
+    BOOST_REQUIRE(nabto_coap_server_init(&server, NULL, &countingAllocator) == NABTO_COAP_ERROR_OK);
+    struct nabto_coap_server_resource* resource = NULL;
+
+    const char* onlyBrace[] = { "{", NULL };
+    BOOST_TEST(nabto_coap_server_add_resource(&server, NABTO_COAP_CODE_GET, onlyBrace, &unusedHandler, NULL, &resource) == NABTO_COAP_ERROR_INVALID_PARAMETER);
+
+    const char* noEndBrace[] = { "{user", NULL };
+    BOOST_TEST(nabto_coap_server_add_resource(&server, NABTO_COAP_CODE_GET, noEndBrace, &unusedHandler, NULL, &resource) == NABTO_COAP_ERROR_INVALID_PARAMETER);
+
+    const char* user[] = { "iam", "{user}", NULL };
+    BOOST_TEST(nabto_coap_server_add_resource(&server, NABTO_COAP_CODE_GET, user, &unusedHandler, NULL, &resource) == NABTO_COAP_ERROR_OK);
+
+    // A parameter on a node which already has one has to carry the
+    // same name, and a prefix of that name is not the same name.
+    const char* prefixOfUser[] = { "iam", "{us}", NULL };
+    BOOST_TEST(nabto_coap_server_add_resource(&server, NABTO_COAP_CODE_POST, prefixOfUser, &unusedHandler, NULL, &resource) == NABTO_COAP_ERROR_INVALID_PARAMETER);
+
+    const char* sameUser[] = { "iam", "{user}", NULL };
+    BOOST_TEST(nabto_coap_server_add_resource(&server, NABTO_COAP_CODE_POST, sameUser, &unusedHandler, NULL, &resource) == NABTO_COAP_ERROR_OK);
+
+    nabto_coap_server_destroy(&server);
+    BOOST_TEST(liveAllocations == allocationsBefore);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

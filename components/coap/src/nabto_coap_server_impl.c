@@ -734,6 +734,20 @@ void nabto_coap_router_insert_path_segment(struct nabto_coap_router_path_segment
     segment->prev = before;
 }
 
+/**
+ * A parameter segment is written {name}. Get the length of name, or
+ * false if the segment is not a well formed parameter.
+ */
+static bool nabto_coap_server_parameter_name_length(const char* segment, size_t* nameLength)
+{
+    size_t length = strlen(segment);
+    if (length < 2 || segment[0] != '{' || segment[length-1] != '}') {
+        return false;
+    }
+    *nameLength = length - 2;
+    return true;
+}
+
 nabto_coap_error nabto_coap_server_add_resource_into_tree(struct nabto_coap_server* server, struct nabto_coap_router_node* parent, nabto_coap_code method, const char** path, nabto_coap_server_resource_handler handler, void* userData, struct nabto_coap_server_resource** userRes)
 {
     if (*path == NULL) {
@@ -759,12 +773,16 @@ nabto_coap_error nabto_coap_server_add_resource_into_tree(struct nabto_coap_serv
         // build further tree
         if (*segment == '{') {
             // this is a parameter
+            size_t nameLength;
+            if (!nabto_coap_server_parameter_name_length(segment, &nameLength)) {
+                return NABTO_COAP_ERROR_INVALID_PARAMETER;
+            }
             if (parent->parameter.name == NULL) {
-                char* parameterName = server->allocator.calloc(strlen(segment) - 1, 1); // remove start and end {}
+                char* parameterName = server->allocator.calloc(nameLength + 1, 1); // room for the terminating zero
                 if (parameterName == NULL) {
                     return NABTO_COAP_ERROR_OUT_OF_MEMORY;
                 }
-                memcpy(parameterName, segment+1, strlen(segment)-2);
+                memcpy(parameterName, segment+1, nameLength);
                 parent->parameter.name = parameterName;
                 parent->parameter.node = nabto_coap_router_node_new(server);
                 if (parent->parameter.node == NULL) {
@@ -772,7 +790,8 @@ nabto_coap_error nabto_coap_server_add_resource_into_tree(struct nabto_coap_serv
                     parent->parameter.name = NULL;
                     return NABTO_COAP_ERROR_OUT_OF_MEMORY;
                 }
-            } else if (strncmp(parent->parameter.name, segment+1, strlen(segment)-2) != 0) {
+            } else if (strlen(parent->parameter.name) != nameLength ||
+                       memcmp(parent->parameter.name, segment+1, nameLength) != 0) {
                 // This is an unknown parameter on a parent where a parameter already exists
                 return NABTO_COAP_ERROR_INVALID_PARAMETER;
             }
