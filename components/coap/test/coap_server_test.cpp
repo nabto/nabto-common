@@ -181,17 +181,20 @@ class TestServer {
         BOOST_TEST(liveAllocations == allocationsBefore_);
     }
 
-    void handlePacket(const std::vector<uint8_t>& packet)
+    // conn defaults to the first connection; pass connection2() to act
+    // as a second, independent client of the same requests context.
+    void handlePacket(const std::vector<uint8_t>& packet, void* conn = NULL)
     {
-        nabto_coap_server_handle_packet(&requests, connection(), packet.data(), packet.size());
+        nabto_coap_server_handle_packet(&requests, conn ? conn : connection(), packet.data(), packet.size());
     }
 
-    // Send everything the server has queued and return it.
-    std::vector<SentMessage> drain()
+    // Send everything the server has queued and return it. Everything
+    // queued must be for conn.
+    std::vector<SentMessage> drain(void* conn = NULL)
     {
         std::vector<SentMessage> sent;
         while (nabto_coap_server_next_event(&requests) == NABTO_COAP_SERVER_NEXT_EVENT_SEND) {
-            BOOST_REQUIRE(nabto_coap_server_get_connection_send(&requests) == connection());
+            BOOST_REQUIRE(nabto_coap_server_get_connection_send(&requests) == (conn ? conn : connection()));
             uint8_t buffer[1500];
             uint8_t* ptr = nabto_coap_server_handle_send(&requests, buffer, buffer + sizeof(buffer));
             BOOST_REQUIRE(ptr != NULL);
@@ -339,6 +342,7 @@ class TestServer {
     }
 
     void* connection() { return &connection_; }
+    void* connection2() { return &connection2_; }
 
     struct nabto_coap_server server;
     struct nabto_coap_server_requests requests;
@@ -360,6 +364,7 @@ class TestServer {
     }
 
     int connection_;
+    int connection2_;
     size_t allocationsBefore_;
 };
 
@@ -1495,6 +1500,98 @@ BOOST_AUTO_TEST_CASE(ack_for_unsent_response_is_ignored)
     BOOST_TEST(sent[0].messageId == responseId);
 
     s.handlePacket(ackPacket(responseId));
+    BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
+// Audit N9 (sc-4866): the message id counter is shared by every
+// connection of a requests context, so a client can predict the ids
+// handed out to another one. It cannot use them: an ACK or a RST is
+// correlated with the message it answers by message id and endpoint
+// (RFC 7252 section 4.4), and the library uses the connection pointer
+// the integrator passes to nabto_coap_server_handle_packet as the
+// endpoint, so a reply on one connection never matches a response in
+// flight on another.
+BOOST_AUTO_TEST_CASE(ack_or_rst_from_another_connection_does_not_match_a_response)
+{
+    for (int rst = 0; rst <= 1; rst++) {
+        TestServer s;
+        s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xc101, "t1").build());
+        BOOST_TEST(s.drain().size() == 1u); // empty ACK
+        BOOST_REQUIRE(s.request != NULL);
+        s.respondNoAck(s.request, NABTO_COAP_CODE_CONTENT);
+        s.request = NULL;
+
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_CON);
+        BOOST_TEST(s.requests.activeRequests == 1u);
+        const std::vector<uint8_t> reply = rst ? rstPacket(sent[0].messageId) : ackPacket(sent[0].messageId);
+
+        // The other connection knows the id and replies to it.
+        s.handlePacket(reply, s.connection2());
+        BOOST_TEST(s.requests.activeRequests == 1u);
+        BOOST_TEST(s.drain().empty());
+
+        // The same reply on the connection the request belongs to ends
+        // the exchange.
+        s.handlePacket(reply);
+        BOOST_TEST(s.requests.activeRequests == 0u);
+    }
+}
+
+// Audit N9 (sc-4866): the same for a notification in flight, which a
+// RST deregisters (RFC 7252 section 4.2). The observer belongs to a
+// connection, so only a RST on that connection reaches it.
+BOOST_AUTO_TEST_CASE(rst_from_another_connection_keeps_an_observer)
+{
+    TestServer s;
+    s.registerObserver("t1", 0xc201);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    BOOST_TEST(s.requests.activeRequests == 0u);
+
+    const std::string notification = "hello";
+    BOOST_REQUIRE(nabto_coap_server_resource_notify(&s.requests, s.getResource, NABTO_COAP_CODE_CONTENT, 0, notification.data(), notification.size()) == NABTO_COAP_ERROR_OK);
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_CON);
+    BOOST_TEST(sent[0].payload == notification);
+
+    s.handlePacket(rstPacket(sent[0].messageId), s.connection2());
+    BOOST_TEST(s.observerCount() == 1u);
+
+    s.handlePacket(rstPacket(sent[0].messageId));
+    BOOST_TEST(s.observerCount() == 0u);
+}
+
+// Audit N9 (sc-4866): the ids two connections see come from the one
+// counter, so the gaps in the ids a client sees tell it how many
+// messages the device sent to other clients in between. Accepted, with
+// the reasoning in the README; this pins the behaviour so that giving
+// the connections separate counters is a deliberate change.
+BOOST_AUTO_TEST_CASE(message_ids_are_shared_across_connections)
+{
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xc301, "t1").build());
+    BOOST_TEST(s.drain().size() == 1u); // empty ACK
+    BOOST_REQUIRE(s.request != NULL);
+    s.respondNoAck(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    uint16_t firstId = sent[0].messageId;
+
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xc302, "t2").build(), s.connection2());
+    BOOST_TEST(s.drain(s.connection2()).size() == 1u); // empty ACK
+    BOOST_REQUIRE(s.request != NULL);
+    s.respondNoAck(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    sent = s.drain(s.connection2());
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].messageId == (uint16_t)(firstId + 1));
+
+    s.handlePacket(ackPacket(firstId));
+    s.handlePacket(ackPacket(sent[0].messageId), s.connection2());
     BOOST_TEST(s.requests.activeRequests == 0u);
 }
 
