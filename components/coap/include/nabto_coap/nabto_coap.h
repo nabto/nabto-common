@@ -170,6 +170,10 @@ struct nabto_coap_incoming_message {
 
 
 
+// RFC 7959 section 2.2: NUM is a 20 bit field, so a block number above
+// this cannot be encoded in a Block option.
+#define NABTO_COAP_BLOCK_NUM_MAX 0xFFFFFu
+
 #define NABTO_COAP_BLOCK_SIZE(value) ((value) & 0x7u)
 #define NABTO_COAP_BLOCK_SIZE_ABSOLUTE(value) (16u << NABTO_COAP_BLOCK_SIZE(value))
 #define NABTO_COAP_BLOCK_NUM(value) ((value) >> 4)

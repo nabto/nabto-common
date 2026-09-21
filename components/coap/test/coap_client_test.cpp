@@ -50,6 +50,8 @@ struct SentMessage {
     uint16_t messageId;
     nabto_coap_token token;
     std::string payload;
+    bool hasBlock1;
+    uint32_t block1;
     bool hasBlock2;
     uint32_t block2;
 };
@@ -77,6 +79,15 @@ class ResponseBuilder {
         ptr_ = nabto_coap_encode_varint_option(NABTO_COAP_OPTION_BLOCK2 - currentOption_, blockOption(num, more, szx), ptr_, end());
         BOOST_REQUIRE(ptr_ != NULL);
         currentOption_ = NABTO_COAP_OPTION_BLOCK2;
+        return *this;
+    }
+
+    // Option 27, so it has to be added after block2 (23).
+    ResponseBuilder& block1(uint32_t num, bool more, uint32_t szx)
+    {
+        ptr_ = nabto_coap_encode_varint_option(NABTO_COAP_OPTION_BLOCK1 - currentOption_, blockOption(num, more, szx), ptr_, end());
+        BOOST_REQUIRE(ptr_ != NULL);
+        currentOption_ = NABTO_COAP_OPTION_BLOCK1;
         return *this;
     }
 
@@ -115,12 +126,15 @@ std::vector<uint8_t> emptyPacket(nabto_coap_type type, uint16_t messageId)
  */
 class TestClient {
  public:
-    TestClient()
+    explicit TestClient(nabto_coap_method method = NABTO_COAP_METHOD_GET, const std::string& body = std::string())
         : allocationsBefore_(liveAllocations)
     {
         BOOST_REQUIRE(nabto_coap_client_init(&client, &countingAllocator, &TestClient::notifyEvent, this) == NABTO_COAP_ERROR_OK);
-        request = nabto_coap_client_request_new(&client, NABTO_COAP_METHOD_GET, 1, path_, &TestClient::endHandler, this, connection());
+        request = nabto_coap_client_request_new(&client, method, 1, path_, &TestClient::endHandler, this, connection());
         BOOST_REQUIRE(request != NULL);
+        if (!body.empty()) {
+            BOOST_REQUIRE(nabto_coap_client_request_set_payload(request, (void*)body.data(), body.size()) == NABTO_COAP_ERROR_OK);
+        }
     }
     ~TestClient()
     {
@@ -156,6 +170,8 @@ class TestClient {
             if (msg.payload != NULL) {
                 m.payload = std::string((const char*)msg.payload, msg.payloadLength);
             }
+            m.hasBlock1 = msg.hasBlock1;
+            m.block1 = msg.block1;
             m.hasBlock2 = msg.hasBlock2;
             m.block2 = msg.block2;
             sent.push_back(m);
@@ -211,6 +227,126 @@ BOOST_AUTO_TEST_SUITE(coap_client)
 
 // Audit M7 (sc-4821): the Block2 error exits freed the response but not
 // the payload reassembled so far.
+// Audit N14: RFC 7959 section 2.5, "the client SHOULD heed the preference
+// indicated and, for all further blocks, use the block size preferred by
+// the server or a smaller one." block1Size was written in exactly one
+// place, request_new, so a server that asked for smaller blocks was
+// ignored and the transfer could never complete against it. Progress was
+// a block counter, which is why the smaller size could not be adopted:
+// the counter's unit changes with it. It is a byte offset now.
+//
+// Section 2.5 figure 3 is the shape: the server keeps everything it was
+// sent and only asks for the rest in smaller pieces, so the next block
+// number is the byte offset in the new size.
+BOOST_AUTO_TEST_CASE(block1_adopts_a_smaller_block_size_from_the_continue)
+{
+    std::string body(1200, 'b');
+    for (size_t i = 0; i < body.size(); i++) { body[i] = (char)('a' + (i % 26)); }
+    TestClient c(NABTO_COAP_METHOD_POST, body);
+
+    SentMessage chunk0 = c.sendRequest();
+    BOOST_TEST(chunk0.hasBlock1);
+    BOOST_TEST(chunk0.block1 == blockOption(0, true, 5));
+    BOOST_TEST(chunk0.payload == body.substr(0, 512));
+
+    // The server keeps the 512 bytes but wants 64 byte blocks from here.
+    BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_ACK, NABTO_COAP_CODE_CONTINUE, chunk0.messageId, chunk0.token).block1(0, true, 2).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+    std::vector<SentMessage> sent = c.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    // Byte offset 512 counted in 64 byte blocks is block 8.
+    BOOST_TEST(sent[0].block1 == blockOption(8, true, 2));
+    BOOST_TEST(sent[0].payload == body.substr(512, 64));
+
+    // And it stays at the smaller size.
+    BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_ACK, NABTO_COAP_CODE_CONTINUE, sent[0].messageId, chunk0.token).block1(8, true, 2).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+    sent = c.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].block1 == blockOption(9, true, 2));
+    BOOST_TEST(sent[0].payload == body.substr(576, 64));
+}
+
+// The server resends its 2.31 Continue for a retransmitted chunk, and the
+// client matches responses by token alone, so a stale Continue for the
+// previous chunk arrives while the next one is in flight. Advancing on it
+// would skip a chunk; treating it as an error would abort a healthy
+// transfer on a lossy link.
+BOOST_AUTO_TEST_CASE(stale_block1_continue_is_ignored)
+{
+    const std::string body(1200, 'b');
+    TestClient c(NABTO_COAP_METHOD_POST, body);
+
+    SentMessage chunk0 = c.sendRequest();
+    BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_ACK, NABTO_COAP_CODE_CONTINUE, chunk0.messageId, chunk0.token).block1(0, true, 5).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+    std::vector<SentMessage> sent = c.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].block1 == blockOption(1, true, 5));
+    SentMessage chunk1 = sent[0];
+
+    // The Continue for chunk 0 again, while chunk 1 is in flight.
+    BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_ACK, NABTO_COAP_CODE_CONTINUE, chunk0.messageId, chunk0.token).block1(0, true, 5).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+    BOOST_TEST(c.drain().empty());
+
+    // The real Continue for chunk 1 still moves the transfer on, to the
+    // last chunk, which is short and clears the more bit.
+    BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_ACK, NABTO_COAP_CODE_CONTINUE, chunk1.messageId, chunk0.token).block1(1, true, 5).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+    sent = c.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].block1 == blockOption(2, false, 5));
+    BOOST_TEST(sent[0].payload == body.substr(1024));
+}
+
+// A 2.31 Continue on the last chunk is a server bug -- there is nothing
+// left to continue -- but it left the request in WAIT_ACK with the body
+// fully sent, so it retransmitted empty requests for a minute before
+// timing out. It completes at once now, with whatever the server said.
+BOOST_AUTO_TEST_CASE(continue_on_the_last_block1_chunk_completes_the_request)
+{
+    const std::string body(600, 'b');
+    TestClient c(NABTO_COAP_METHOD_POST, body);
+
+    SentMessage chunk0 = c.sendRequest();
+    BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_ACK, NABTO_COAP_CODE_CONTINUE, chunk0.messageId, chunk0.token).block1(0, true, 5).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+    std::vector<SentMessage> sent = c.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].block1 == blockOption(1, false, 5));
+
+    // The whole body is sent, and the server answers Continue anyway.
+    BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_ACK, NABTO_COAP_CODE_CONTINUE, sent[0].messageId, chunk0.token).block1(1, false, 5).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+    BOOST_TEST(c.drain().empty());
+    BOOST_TEST(c.runCallback());
+    BOOST_TEST(c.endHandlerCalls == 1u);
+    BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_OK);
+    BOOST_TEST(nabto_coap_client_response_get_code(nabto_coap_client_request_get_response(c.request)) == 231);
+}
+
+// RFC 7959 section 2.9.3: "a 4.13 response with a smaller SZX in its
+// Block1 Option than requested is a hint to try a smaller SZX". The
+// server discards what it has, so the transfer starts over at block zero,
+// once: a server that keeps answering 4.13 must not loop the client.
+BOOST_AUTO_TEST_CASE(request_entity_too_large_with_a_smaller_szx_restarts_once)
+{
+    const std::string body(1200, 'b');
+    TestClient c(NABTO_COAP_METHOD_POST, body);
+
+    SentMessage chunk0 = c.sendRequest();
+    BOOST_TEST(chunk0.block1 == blockOption(0, true, 5));
+
+    BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_ACK, NABTO_COAP_CODE_REQUEST_ENTITY_TOO_LARGE, chunk0.messageId, chunk0.token).block1(0, false, 2).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+    std::vector<SentMessage> sent = c.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].block1 == blockOption(0, true, 2));
+    BOOST_TEST(sent[0].payload == body.substr(0, 64));
+    BOOST_TEST(sent[0].messageId != chunk0.messageId);
+    BOOST_TEST(c.endHandlerCalls == 0u);
+
+    // A second hint is not taken; the error is the answer.
+    BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_ACK, NABTO_COAP_CODE_REQUEST_ENTITY_TOO_LARGE, sent[0].messageId, chunk0.token).block1(0, false, 1).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+    BOOST_TEST(c.drain().empty());
+    BOOST_TEST(c.runCallback());
+    BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_OK);
+    BOOST_TEST(nabto_coap_client_response_get_code(nabto_coap_client_request_get_response(c.request)) == 413);
+}
+
 // Audit N13: RFC 7959 section 2.1, a Block option must not occur twice.
 // The client cannot tell which occurrence the server meant, so the
 // response is rejected and reset rather than reassembled from one of them.
