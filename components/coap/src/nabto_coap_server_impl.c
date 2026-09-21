@@ -735,13 +735,14 @@ void nabto_coap_router_insert_path_segment(struct nabto_coap_router_path_segment
 }
 
 /**
- * A parameter segment is written {name}. Get the length of name, or
- * false if the segment is not a well formed parameter.
+ * A parameter segment is written {name} and name is at least one
+ * character. Get the length of name, or false if the segment is not a
+ * well formed parameter.
  */
 static bool nabto_coap_server_parameter_name_length(const char* segment, size_t* nameLength)
 {
     size_t length = strlen(segment);
-    if (length < 2 || segment[0] != '{' || segment[length-1] != '}') {
+    if (length < 3 || segment[0] != '{' || segment[length-1] != '}') {
         return false;
     }
     *nameLength = length - 2;

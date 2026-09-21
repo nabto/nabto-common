@@ -1511,6 +1511,9 @@ BOOST_AUTO_TEST_CASE(malformed_parameter_segment_is_rejected)
     const char* onlyBrace[] = { "{", NULL };
     BOOST_TEST(nabto_coap_server_add_resource(&server, NABTO_COAP_CODE_GET, onlyBrace, &unusedHandler, NULL, &resource) == NABTO_COAP_ERROR_INVALID_PARAMETER);
 
+    const char* emptyName[] = { "{}", NULL };
+    BOOST_TEST(nabto_coap_server_add_resource(&server, NABTO_COAP_CODE_GET, emptyName, &unusedHandler, NULL, &resource) == NABTO_COAP_ERROR_INVALID_PARAMETER);
+
     const char* noEndBrace[] = { "{user", NULL };
     BOOST_TEST(nabto_coap_server_add_resource(&server, NABTO_COAP_CODE_GET, noEndBrace, &unusedHandler, NULL, &resource) == NABTO_COAP_ERROR_INVALID_PARAMETER);
 
