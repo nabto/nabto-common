@@ -383,6 +383,50 @@ BOOST_AUTO_TEST_CASE(block2_followup_request_carries_no_request_body)
     BOOST_TEST(std::string((const char*)payload, payloadLength) == response);
 }
 
+// Audit N8 (sc-4865): any Block2 block whose offset was not exactly the
+// length reassembled so far was an error, and the whole body was thrown
+// away. A retransmitted block is exactly that. The client receives block
+// N, queues its ack and sends the request for block N+1; both are lost;
+// the server retransmits block N after its ack timeout and the client,
+// waiting for N+1, dropped everything and then mismatched on every later
+// block until the request timed out. The duplicate was not acked either,
+// so the server kept retransmitting it.
+BOOST_AUTO_TEST_CASE(duplicate_block2_block_is_acked_and_ignored)
+{
+    const std::string body(48, 'r'); // three 16 byte blocks
+    TestClient c;
+    SentMessage req = c.sendRequest();
+
+    BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_ACK, NABTO_COAP_CODE_CONTENT, req.messageId, req.token).block2(0, true, 0).payload(body.substr(0, 16)).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+    std::vector<SentMessage> sent = c.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].block2 == blockOption(1, false, 0));
+
+    BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_CONTENT, 0x4001, req.token).block2(1, true, 0).payload(body.substr(16, 16)).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+    sent = c.drain();
+    BOOST_REQUIRE(sent.size() == 2);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);   // for the CON block
+    BOOST_TEST(sent[1].block2 == blockOption(2, false, 0)); // request for block 2
+
+    // The server retransmits block 1 because it never saw the ack.
+    BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_CONTENT, 0x4001, req.token).block2(1, true, 0).payload(body.substr(16, 16)).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+    BOOST_REQUIRE(c.request->response != NULL);
+    BOOST_TEST(c.request->response->payloadLength == 32u);
+    sent = c.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+    BOOST_TEST(sent[0].messageId == 0x4001);
+
+    // And the transfer finishes.
+    BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_ACK, NABTO_COAP_CODE_CONTENT, 0x4002, req.token).block2(2, false, 0).payload(body.substr(32)).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+    BOOST_TEST(c.runCallback());
+    BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_OK);
+    const uint8_t* payload;
+    size_t payloadLength;
+    BOOST_REQUIRE(nabto_coap_client_response_get_payload(nabto_coap_client_request_get_response(c.request), &payload, &payloadLength));
+    BOOST_TEST(std::string((const char*)payload, payloadLength) == body);
+}
+
 // Audit N13: RFC 7959 section 2.1, a Block option must not occur twice.
 // The client cannot tell which occurrence the server meant, so the
 // response is rejected and reset rather than reassembled from one of them.
