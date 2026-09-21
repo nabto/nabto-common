@@ -211,6 +211,23 @@ BOOST_AUTO_TEST_SUITE(coap_client)
 
 // Audit M7 (sc-4821): the Block2 error exits freed the response but not
 // the payload reassembled so far.
+// Audit N13: RFC 7959 section 2.1, a Block option must not occur twice.
+// The client cannot tell which occurrence the server meant, so the
+// response is rejected and reset rather than reassembled from one of them.
+BOOST_AUTO_TEST_CASE(response_with_repeated_block2_option_is_reset)
+{
+    const std::string chunk(16, 'a');
+    TestClient c;
+    SentMessage req = c.sendRequest();
+    BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_CONTENT, req.messageId, req.token).block2(0, true, 0).block2(3, true, 0).payload(chunk).build()) == NABTO_COAP_CLIENT_STATUS_DECODE_ERROR);
+    BOOST_TEST(c.request->response == (struct nabto_coap_client_response*)NULL);
+
+    std::vector<SentMessage> sent = c.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_RST);
+    BOOST_TEST(sent[0].messageId == req.messageId);
+}
+
 BOOST_AUTO_TEST_CASE(block2_error_releases_reassembled_payload)
 {
     const std::string chunk(16, 'a');

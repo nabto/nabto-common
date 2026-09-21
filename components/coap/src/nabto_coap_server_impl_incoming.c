@@ -198,6 +198,16 @@ void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests
 
 bool nabto_coap_server_validate_critical_options(struct nabto_coap_incoming_message* message)
 {
+    // RFC 7959 section 2.1: "Either Block option MUST NOT occur more than
+    // once in a single message." RFC 7252 section 5.4.5 says a repeated
+    // option that is not repeatable "MUST be treated like an unrecognized
+    // option", and both Block options are critical, so this is the same
+    // answer an unknown critical option gets: 4.02 for a CON, a RST for a
+    // NON. Dropping the message instead would tell the peer nothing.
+    if (message->hasRepeatedBlockOption) {
+        return false;
+    }
+
     struct nabto_coap_option_iterator iteratorData;
     struct nabto_coap_option_iterator* iterator = &iteratorData;
     nabto_coap_option_iterator_init(iterator, message->options, message->options + message->optionsLength);

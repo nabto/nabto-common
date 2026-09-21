@@ -346,6 +346,18 @@ enum nabto_coap_client_status nabto_coap_client_handle_packet(struct nabto_coap_
         return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
     }
 
+    // RFC 7959 section 2.1: "Either Block option MUST NOT occur more than
+    // once in a single message." The response cannot be acted on, so
+    // reject it and, when it is a message that can be reset, say so.
+    if (message.hasRepeatedBlockOption) {
+        if (message.type == NABTO_COAP_TYPE_CON || message.type == NABTO_COAP_TYPE_NON) {
+            client->needSendRst = true;
+            client->messageIdRst = message.messageId;
+            client->connectionRst = connection;
+        }
+        return NABTO_COAP_CLIENT_STATUS_DECODE_ERROR;
+    }
+
     // ack with empty is just acking a message but does not contain a response payload.
     if (message.type == NABTO_COAP_TYPE_ACK && message.code == NABTO_COAP_CODE_EMPTY) {
         nabto_coap_client_handle_ack(client, &message, connection, now);

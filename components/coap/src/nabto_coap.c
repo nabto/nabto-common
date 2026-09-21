@@ -176,12 +176,18 @@ bool nabto_coap_parse_message(const uint8_t* packet, size_t packetSize, struct n
                 if (!nabto_coap_parse_variable_int(iterator->optionDataBegin, iterator->optionDataEnd, 3, &value)) {
                     return false;
                 }
+                if (msg->hasBlock1) {
+                    msg->hasRepeatedBlockOption = true;
+                }
                 msg->hasBlock1 = true;
                 msg->block1 = value;
                 break;
             case NABTO_COAP_OPTION_BLOCK2:
                 if (!nabto_coap_parse_variable_int(iterator->optionDataBegin, iterator->optionDataEnd, 3, &value)) {
                     return false;
+                }
+                if (msg->hasBlock2) {
+                    msg->hasRepeatedBlockOption = true;
                 }
                 msg->hasBlock2 = true;
                 msg->block2 = value;
