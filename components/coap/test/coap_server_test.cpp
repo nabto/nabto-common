@@ -872,6 +872,129 @@ BOOST_AUTO_TEST_CASE(con_request_for_next_block2_block_is_acked)
     BOOST_TEST(s.requests.activeRequests == 0u);
 }
 
+// Audit N11 (sc-4869): sendNow and retransmissions could not tell "sent,
+// waiting for ACK" from "ACKed, waiting for the next block request", so a
+// duplicate ACK matched the already acknowledged block again, advanced
+// block2Current a second time and ended the response early. Duplicate ACKs
+// are ordinary: a client acks every copy of a CON it receives.
+BOOST_AUTO_TEST_CASE(duplicate_ack_does_not_advance_block2_response)
+{
+    TestServer s;
+    const std::string body(1024, 'x'); // two 512 byte blocks
+    s.startBlock2Response("t1", body, 0xe301);
+
+    // The ACK for block 0 arrives twice.
+    s.handlePacket(ackPacket(s.requests.messageId));
+    BOOST_TEST(s.requests.activeRequests == 1u);
+    BOOST_TEST(s.handlerCalls == 1u);
+    BOOST_TEST(s.drain().empty());
+
+    // Block 1 is still there to be fetched, from the same request.
+    SentMessage block = s.requestBlock2("t1", 0xe302, 1, 5);
+    BOOST_TEST(block.block2 == blockOption(1, false, 5));
+    BOOST_TEST(block.payload == body.substr(512));
+    BOOST_TEST(s.handlerCalls == 1u);
+    s.handlePacket(ackPacket(block.messageId));
+    BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
+// Once a block has been acknowledged the server waits for the client to
+// ask for the next one. The retransmission deadline must not fire in the
+// meantime: retransmitting the acked block is pointless and pushing the
+// next block unsolicited is not how RFC 7959 drives a Block2 transfer.
+BOOST_AUTO_TEST_CASE(acked_block2_block_is_not_retransmitted)
+{
+    TestServer s;
+    const std::string body(1024, 'x');
+    s.startBlock2Response("t1", body, 0xe311);
+
+    s.now += NABTO_COAP_ACK_TIMEOUT << NABTO_COAP_MAX_RETRANSMITS;
+    nabto_coap_server_handle_timeout(&s.requests);
+    BOOST_TEST(s.drain().empty());
+    BOOST_TEST(s.requests.activeRequests == 1u);
+
+    SentMessage block = s.requestBlock2("t1", 0xe312, 1, 5);
+    BOOST_TEST(block.payload == body.substr(512));
+    s.handlePacket(ackPacket(block.messageId));
+    BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
+// A client that acks a block and then never asks for the next one would
+// otherwise hold the request for the life of the connection, so the
+// acked-and-quiet state gets the same 64 s deadline as a Block1 transfer
+// being received (sc-4860).
+BOOST_AUTO_TEST_CASE(acked_block2_transfer_that_goes_quiet_is_reaped)
+{
+    const uint32_t transferTimeout = NABTO_COAP_ACK_TIMEOUT << (NABTO_COAP_MAX_RETRANSMITS + 1);
+    TestServer s;
+    const std::string body(1024, 'x');
+    s.startBlock2Response("t1", body, 0xe321);
+
+    uint32_t nextTimeout = 0;
+    BOOST_TEST(nabto_coap_server_get_next_timeout(&s.requests, &nextTimeout));
+    BOOST_TEST(nextTimeout == s.now + transferTimeout);
+
+    // Just before the deadline the transfer is kept.
+    s.now += transferTimeout - 1;
+    nabto_coap_server_handle_timeout(&s.requests);
+    BOOST_TEST(s.requests.activeRequests == 1u);
+    BOOST_TEST(s.drain().empty());
+
+    // At the deadline it is discarded, with nothing sent.
+    s.now += 1;
+    nabto_coap_server_handle_timeout(&s.requests);
+    BOOST_TEST(s.requests.activeRequests == 0u);
+    BOOST_TEST(s.handlerCalls == 1u);
+    BOOST_TEST(s.drain().empty());
+}
+
+// The N1 property (sc-4858) inside the Block2 flow: handle_data_for_response
+// assigns a fresh message id for the next block, and that id must not be
+// matchable until the block carrying it has actually been sent. The ids are
+// a predictable counter, so a client can name the next one.
+BOOST_AUTO_TEST_CASE(ack_for_unsent_block2_message_id_is_ignored)
+{
+    TestServer s;
+    const std::string body(1024, 'x');
+    s.startBlock2Response("t1", body, 0xe331);
+
+    // Set block 1 up but do not let the server send it yet.
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0xe332, "t1").block2(1, 5).build());
+    uint16_t unsent = s.requests.messageId;
+    s.handlePacket(ackPacket(unsent));
+    BOOST_TEST(s.requests.activeRequests == 1u);
+
+    // The block is still queued and still carries the whole tail.
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 2);
+    BOOST_TEST(sent[1].messageId == unsent);
+    BOOST_TEST(sent[1].block2 == blockOption(1, false, 5));
+    BOOST_TEST(sent[1].payload == body.substr(512));
+    s.handlePacket(ackPacket(unsent));
+    BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
+// A NON response is never retransmitted, but it has been sent, so RFC 7252
+// section 4.3 lets the peer reject it with a RST and that must end the
+// request rather than leave it for the expiry tick.
+BOOST_AUTO_TEST_CASE(rst_for_sent_non_response_ends_the_request)
+{
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_NON, NABTO_COAP_CODE_GET, 0xe341, "t1").build());
+    BOOST_REQUIRE(s.request != NULL);
+    s.respondNoAck(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_NON);
+    BOOST_TEST(s.requests.activeRequests == 1u);
+
+    s.handlePacket(rstPacket(sent[0].messageId));
+    BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
+
 // Audit H1 (sc-4811): the block number of a Block2 request was used as
 // an offset into the response payload without a bounds check, so a
 // client could make the server send heap memory past the payload. RFC

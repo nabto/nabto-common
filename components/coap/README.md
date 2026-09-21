@@ -91,7 +91,12 @@ until the application sets them.
 - Block2 serving with 512 byte blocks by default and late negotiation
   (the client can ask for smaller blocks). A block past the end of the
   body is a 4.00. The response is kept until the last block has been
-  ACKed.
+  ACKed. Which block is next is decided only by the client's Block2
+  request; an ACK says that the block named by the id it carries
+  arrived, so a duplicate ACK changes nothing. A transfer whose current
+  block has been ACKed and which the client then stops asking for is
+  discarded after 64 s, the same span as a Block1 transfer being
+  received.
 - Missing: Size1 and Size2.
 
 ## RFC 7641, observe
@@ -137,10 +142,13 @@ can take as long as the connection is alive. The client therefore
 only bounds the wait for a response with the timeout the caller sets
 on the request (`nabto_coap_client_request_set_timeout`, two minutes
 by default). The server likewise puts no deadline on a request the
-application holds; the only server-side deadline on a request is the
-one on a Block1 transfer still being received, where the application
-has not seen the request yet and a silent client would otherwise hold
-a request slot and a partial body for the life of the connection.
+application holds. Its deadlines are on the two states where the
+client owes the server a packet and a silent one would otherwise hold
+a request slot and a body for the life of the connection: a Block1
+transfer still being received, where the application has not seen the
+request yet, and a Block2 response whose current block has been ACKed
+and whose next block the client has not asked for. Both are 64 s,
+`ACK_TIMEOUT` doubled `MAX_RETRANSMIT` + 1 times.
 
 ### Why there are no tokens in ACK and RST messages
 

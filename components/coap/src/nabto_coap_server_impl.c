@@ -192,12 +192,26 @@ void nabto_coap_server_handle_timeout(struct nabto_coap_server_requests* request
         if (current->state == NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE &&
             nabto_coap_is_stamp_less_equal(current->response.timeout, now))
         {
-            if (current->response.retransmissions > NABTO_COAP_MAX_RETRANSMITS) {
+            // Two deadlines share response.timeout and waitingForAck tells
+            // them apart, the same way the observer loop below does it.
+            if (current->response.waitingForAck) {
+                // A block is in flight and its ack has not arrived.
+                if (current->response.retransmissions > NABTO_COAP_MAX_RETRANSMITS) {
+                    current->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
+                    nabto_coap_server_free_request(current);
+                    continue;
+                }
+                // Stays in flight while it is queued again: the copy
+                // already sent can still be acknowledged.
+                current->response.sendNow = true;
+            } else if (!current->response.sendNow) {
+                // The block was acknowledged and the client never asked
+                // for the next one. Nothing to retransmit, so the
+                // transfer deadline armed in handle_ack has run out.
                 current->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
                 nabto_coap_server_free_request(current);
                 continue;
             }
-            current->response.sendNow = true;
         }
     }
 
@@ -508,6 +522,11 @@ static uint8_t* nabto_coap_server_send_in_response_state(struct nabto_coap_serve
         payloadRestLength = blockSize;
     }
     ptr = nabto_coap_encode_payload(payloadRestStart, payloadRestLength, ptr, end);
+
+    // The block is on the wire. A NON is never retransmitted, but it has
+    // been sent, so RFC 7252 section 4.3 still lets the peer reject it
+    // with a RST and that has to match.
+    response->waitingForAck = true;
 
     if (request->type == NABTO_COAP_TYPE_NON) {
         // NONs should not be retransmitted let it expire asap

@@ -64,6 +64,7 @@ struct nabto_coap_server_request;
 struct nabto_coap_server_response {
     struct nabto_coap_server_request* request;
     bool sendNow;
+    bool waitingForAck; // the block has been sent, waiting for ACK/timeout/RST
     uint8_t retransmissions;
     uint32_t timeout;
     uint16_t messageId;

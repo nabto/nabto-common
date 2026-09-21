@@ -58,18 +58,24 @@ static bool nabto_coap_server_observer_notification_in_flight(struct nabto_coap_
 
 /**
  * A response with the request's current message id has been sent and
- * not yet acknowledged: the request is in RESPONSE state and the
- * response is waiting for its ACK, or timed out and is queued for
- * retransmission. Only such a response is matched by an ACK or RST
- * (RFC 7252 section 4.2). The id is assigned when the request is
- * created, so a request still being received, or with the application,
- * has an id the client has never seen but can guess; matching it would
- * end the request before the application ever owned it.
+ * not yet acknowledged. Only such a response is matched by an ACK or RST
+ * (RFC 7252 section 4.2). A message id is assigned when the request is
+ * created and again for every further Block2 block, so a request still
+ * being received, one with the application, and one whose next block has
+ * been set up but not yet sent all carry an id the client has never seen
+ * but can guess; matching one of those would end the request before the
+ * block it names is on the wire.
+ *
+ * The flag is the whole predicate, unlike the observer's, because a
+ * response has three places that make it sendable again: the send itself,
+ * a retransmission from handle_timeout, and the client asking for the next
+ * block in handle_data_for_response. sendNow and retransmissions cannot
+ * tell those apart.
  */
 static bool nabto_coap_server_response_in_flight(struct nabto_coap_server_request* request)
 {
     return request->state == NABTO_COAP_SERVER_REQUEST_STATE_RESPONSE &&
-        (!request->response.sendNow || request->response.retransmissions > 0);
+        request->response.waitingForAck;
 }
 
 /**
@@ -416,6 +422,9 @@ void nabto_coap_server_handle_data_for_response(struct nabto_coap_server_request
         response->block2Size = NABTO_COAP_BLOCK_SIZE(message->block2);
         response->messageId = nabto_coap_server_next_message_id(requests);
         response->sendNow = true;
+        // The fresh id has not been sent yet, so nothing may acknowledge
+        // or reset it until the block carrying it goes out.
+        response->waitingForAck = false;
         response->retransmissions = 0;
     }
 }
@@ -491,32 +500,40 @@ struct nabto_coap_server_request* nabto_coap_server_handle_new_request(struct na
 
 void nabto_coap_server_handle_ack(struct nabto_coap_server_requests* requests, struct nabto_coap_server_request* request, struct nabto_coap_incoming_message* message)
 {
-    (void)requests;
     struct nabto_coap_server_response* response = &request->response;
 
     if (response->messageId != message->messageId) {
         return;
     }
 
+    response->waitingForAck = false;
+
+    // The block just acknowledged ends at (block2Current + 1) * blockSize,
+    // and the last one ends at or past the payload -- exactly at it when
+    // the payload is a multiple of the block size, hence >=. With no
+    // payload, or one that fits in a single block, block2Current is 0 and
+    // this is the whole response.
+    //
+    // block2Current is never advanced here. The client's next Block2
+    // request is its only writer (handle_data_for_response), so a
+    // duplicate ACK -- which is ordinary, a client acks every copy of a
+    // CON it receives -- recomputes the same answer instead of walking
+    // the response forward and ending it early.
     size_t blockSize = (16 << response->block2Size);
-    if (response->payloadLength <= blockSize) {
+    if ((size_t)(response->block2Current + 1) * blockSize >= response->payloadLength) {
         request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
         nabto_coap_server_free_request(request);
         return;
     }
 
-    // handle block2 ack
-    response->block2Current += 1;
-
-    // The last block ends exactly at payloadLength when the payload is a
-    // multiple of the block size, so >= is the completion test.
-    if (response->block2Current * blockSize >= response->payloadLength) {
-        request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
-        nabto_coap_server_free_request(request);
-        return;
-    }
-
-    // else wait for the client to ask for the next block.
+    // Wait for the client to ask for the next block, under a transfer
+    // deadline rather than the retransmission one: the block in hand has
+    // been acknowledged, so there is nothing to retransmit, and a client
+    // that goes quiet would otherwise hold the request and the whole
+    // response body for as long as the connection lives. Same span as a
+    // Block1 transfer being received.
+    response->retransmissions = 0;
+    response->timeout = nabto_coap_server_stamp_now(requests) + (requests->server->ackTimeout << (NABTO_COAP_MAX_RETRANSMITS + 1));
 }
 
 
