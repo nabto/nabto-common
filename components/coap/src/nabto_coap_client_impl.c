@@ -595,9 +595,16 @@ uint8_t* nabto_coap_client_request_create_packet(struct nabto_coap_client_reques
         currentOption = NABTO_COAP_OPTION_BLOCK2;
     }
 
+    // RFC 7959 section 3.3, the combined Block1/Block2 example: "(no
+    // payload for requests with Block2 with NUM != 0)". Once we are
+    // fetching further blocks of the response, the body has been handed
+    // over and repeating it would deliver it more than once to a server
+    // that reads it.
+    bool fetchingFurtherBlock2 = request->hasBlock2 && NABTO_COAP_BLOCK_NUM(request->block2) > 0;
+
     size_t blockSize = (16u << request->block1Size);
     size_t payloadOffset = request->block1Offset;
-    if (payloadOffset < request->payloadLength) {
+    if (!fetchingFurtherBlock2 && payloadOffset < request->payloadLength) {
         size_t payloadRestLength = request->payloadLength - payloadOffset;
 
         if (request->payloadLength > blockSize) {

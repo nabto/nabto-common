@@ -83,7 +83,9 @@ until the application sets them.
 - Block2 reassembly of response bodies at the block size chosen by
   the server, with checks of the offset and of the length of each
   block. `nabto_coap_client_limit_response_size` bounds the
-  reassembled body.
+  reassembled body. A request fetching a block other than the first
+  carries no request body and no Block1 option, as section 3.3
+  requires; the body was handed over in the first exchange.
 - Missing: early negotiation of the response block size, Size1 and
   Size2.
 
