@@ -26,9 +26,9 @@ void nn_string_map_deinit(struct nn_string_map* map)
 void nn_string_map_destroy_item(struct nn_string_map* map, struct nn_string_map_item* item)
 {
     nn_llist_erase_node(&item->node);
-    map->allocator.free(item->key);
-    map->allocator.free(item->value);
-    map->allocator.free(item);
+    nn_allocator_free(&map->allocator, item->key);
+    nn_allocator_free(&map->allocator, item->value);
+    nn_allocator_free(&map->allocator, item);
 }
 
 struct nn_string_map_iterator nn_string_map_insert(struct nn_string_map* map, const char* key, const char* value)
@@ -41,11 +41,13 @@ struct nn_string_map_iterator nn_string_map_insert(struct nn_string_map* map, co
         }
     }
 
-    struct nn_string_map_item* item = map->allocator.calloc(1, sizeof(struct nn_string_map_item));
+    struct nn_string_map_item* item = nn_allocator_calloc(&map->allocator, 1, sizeof(struct nn_string_map_item));
     char* keyDup = nn_strdup(key, &map->allocator);
     char* valueDup = nn_strdup(value, &map->allocator);
     if (item == NULL || keyDup == NULL || valueDup == NULL) {
-        map->allocator.free(item); map->allocator.free(keyDup); map->allocator.free(valueDup);
+        nn_allocator_free(&map->allocator, item);
+        nn_allocator_free(&map->allocator, keyDup);
+        nn_allocator_free(&map->allocator, valueDup);
         return nn_string_map_end(map);
     }
 

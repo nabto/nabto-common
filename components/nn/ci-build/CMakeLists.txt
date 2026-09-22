@@ -14,6 +14,7 @@ if (NOT Boost_FOUND)
 endif()
 
 set(test_src
+    ${test_dir}/nn/allocator_test.cpp
     ${test_dir}/nn/endian_test.cpp
     ${test_dir}/nn/vector_test.cpp
     ${test_dir}/nn/string_set_test.cpp

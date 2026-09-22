@@ -27,14 +27,14 @@ bool nn_vector_push_back(struct nn_vector* vector, void* element)
         if (newCapacity == 0) {
             newCapacity = 1;
         }
-        void** newElements = vector->allocator.calloc(newCapacity,vector->itemSize);
+        void** newElements = nn_allocator_calloc(&vector->allocator, newCapacity, vector->itemSize);
         if (newElements == NULL) {
             return false;
         }
         if (vector->elements != NULL) {
             memcpy(newElements, vector->elements, (vector->capacity * vector->itemSize));
         }
-        vector->allocator.free(vector->elements);
+        nn_allocator_free(&vector->allocator, vector->elements);
         vector->elements = newElements;
         vector->capacity = newCapacity;
     }
