@@ -20,10 +20,10 @@ const char* nn_ip_address_to_string(const struct nn_ip_address* address)
     memset(outputBuffer, 0, 40);
     if (address->type == NN_IPV4) {
         const uint8_t* ip = address->ip.v4;
-        sprintf(outputBuffer, "%" PRIu8 ".%" PRIu8 ".%" PRIu8 ".%" PRIu8, ip[0], ip[1], ip[2], ip[3]);
+        snprintf(outputBuffer, sizeof(outputBuffer), "%" PRIu8 ".%" PRIu8 ".%" PRIu8 ".%" PRIu8, ip[0], ip[1], ip[2], ip[3]);
     } else if (address->type == NN_IPV6) {
         const uint8_t* ip = address->ip.v6;
-        sprintf(outputBuffer, "%02x%02x:" "%02x%02x:" "%02x%02x:" "%02x%02x:" "%02x%02x:" "%02x%02x:" "%02x%02x:" "%02x%02x", ip[0], ip[1], ip[2], ip[3], ip[4], ip[5], ip[6], ip[7], ip[8], ip[9], ip[10], ip[11], ip[12], ip[13], ip[14], ip[15]);
+        snprintf(outputBuffer, sizeof(outputBuffer), "%02x%02x:" "%02x%02x:" "%02x%02x:" "%02x%02x:" "%02x%02x:" "%02x%02x:" "%02x%02x:" "%02x%02x", ip[0], ip[1], ip[2], ip[3], ip[4], ip[5], ip[6], ip[7], ip[8], ip[9], ip[10], ip[11], ip[12], ip[13], ip[14], ip[15]);
     }
     return outputBuffer;
 }
@@ -56,11 +56,16 @@ void nn_ip_convert_v4_to_v4_mapped(const struct nn_ip_address* v4, struct nn_ip_
     // convert v4 to v4 mapped ipv6 address.  ipv4 mapped ipv6
     // addresses consist of the prefix 0:0:0:0:0:FFFF and then the
     // ipv4 address.
+    // v4 and v6 may be the same address, and ip.v4 and ip.v6 share a
+    // union, so take a copy before the prefix overwrites the octets.
+    uint8_t octets[4];
+    memcpy(octets, v4->ip.v4, 4);
+
     v6->type = NN_IPV6;
     uint8_t* ptr = v6->ip.v6;
     // 80 bits of zeroes
     memcpy(ptr, ipv4MappedIpv6Prefix, 12);
-    memcpy(ptr + 12, v4->ip.v4, 4);
+    memcpy(ptr + 12, octets, 4);
 }
 
 void nn_ip_convert_v4_mapped_to_v4(const struct nn_ip_address* v6, struct nn_ip_address* v4)

@@ -96,8 +96,13 @@ bool nn_vector_is_end(const struct nn_vector_iterator* it);
 
 /**
  * Helper macro to iterate over all elements in the vector
+ *
+ * element is a pointer to write each element to, so it cannot be pasted
+ * into the iterator's name the way NN_VECTOR_FOREACH_REFERENCE does it.
+ * The name below is spelled out instead, so that a caller variable called
+ * it, or a nested loop, is not shadowed.
  */
-#define NN_VECTOR_FOREACH(element, vector) for (struct nn_vector_iterator it = nn_vector_begin(vector); nn_vector_get_element(&it, element), !nn_vector_is_end(&it); nn_vector_next(&it))
+#define NN_VECTOR_FOREACH(element, vector) for (struct nn_vector_iterator nnVectorForeachIt = nn_vector_begin(vector); nn_vector_get_element(&nnVectorForeachIt, element), !nn_vector_is_end(&nnVectorForeachIt); nn_vector_next(&nnVectorForeachIt))
 
 /**
  * Helper macro to iterate over all elements in the vector by their

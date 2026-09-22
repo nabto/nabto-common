@@ -221,4 +221,38 @@ BOOST_AUTO_TEST_CASE(push_back_refuses_to_overflow_the_capacity)
     BOOST_TEST(!nn_vector_push_back(&vector, &item));
 }
 
+BOOST_AUTO_TEST_CASE(foreach_does_not_shadow_the_callers_iterator)
+{
+    // The macro used to declare its iterator as plain "it", which shadowed
+    // a caller variable of that name and made nested loops rely on
+    // shadowing to work.
+    struct nn_vector outer;
+    struct nn_vector inner;
+    nn_vector_init(&outer, sizeof(int), &defaultAllocator);
+    nn_vector_init(&inner, sizeof(int), &defaultAllocator);
+
+    for (int i = 0; i < 3; i++) {
+        nn_vector_push_back(&outer, &i);
+        nn_vector_push_back(&inner, &i);
+    }
+
+    int it = 100;      // a caller variable which the macro must not shadow
+    int pairs = 0;
+    int a;
+    NN_VECTOR_FOREACH(&a, &outer)
+    {
+        int b;
+        NN_VECTOR_FOREACH(&b, &inner)
+        {
+            pairs++;
+            BOOST_TEST(it == 100);
+        }
+    }
+    BOOST_TEST(pairs == 9);
+    BOOST_TEST(it == 100);
+
+    nn_vector_deinit(&outer);
+    nn_vector_deinit(&inner);
+}
+
 BOOST_AUTO_TEST_SUITE_END()

@@ -121,6 +121,12 @@ bool nn_llist_is_end(const struct nn_llist_iterator* iterator);
 void* nn_llist_get_item(const struct nn_llist_iterator* iterator);
 
 /**
+ * Get the node at the current iterator position. Useful to erase the
+ * element an iterator has already moved past, see nn_llist_erase().
+ */
+struct nn_llist_node* nn_llist_get_node(const struct nn_llist_iterator* iterator);
+
+/**
  * Iterate over the list
  *
  * struct nn_llist list;

@@ -67,12 +67,12 @@ void nn_set_clear(struct nn_set* set);
 /**
  * @return true iff the set is empty
  */
-bool nn_set_empty(struct nn_set* set);
+bool nn_set_empty(const struct nn_set* set);
 
 /**
  * @return the size of the set
  */
-size_t nn_set_size(struct nn_set* set);
+size_t nn_set_size(const struct nn_set* set);
 
 /**
  * Initialize the iterator to the first element in the set.
@@ -94,7 +94,13 @@ void nn_set_next(struct nn_set_iterator* it);
  */
 void nn_set_get_element(const struct nn_set_iterator* it, void* item);
 
-#define NN_SET_FOREACH(item, set) for(struct nn_set_iterator it = nn_set_begin(set); nn_set_get_element(&it, item), !nn_set_is_end(&it); nn_set_next(&it))
+/**
+ * Helper macro to iterate over all items in the set
+ *
+ * As NN_VECTOR_FOREACH, item is a pointer to write each item to, so the
+ * iterator's name is spelled out rather than pasted from it.
+ */
+#define NN_SET_FOREACH(item, set) for(struct nn_set_iterator nnSetForeachIt = nn_set_begin(set); nn_set_get_element(&nnSetForeachIt, item), !nn_set_is_end(&nnSetForeachIt); nn_set_next(&nnSetForeachIt))
 
 
 
