@@ -12,19 +12,35 @@ defaults:
 
 jobs:
   build-and-test:
-    name: Build
+    name: ${{matrix.name}}
     runs-on: ${{matrix.os}}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-22.04]
+        include:
+          - name: Build
+            os: ubuntu-22.04
+            cmake_args: ""
+          # nn is a data structure library with no wire input, so the
+          # sanitizers are the main thing standing between it and a silent
+          # memory bug. clang rather than gcc: gcc's -fsanitize=undefined
+          # leaves out pointer-overflow, which is what catches forming a
+          # pointer from an empty vector's NULL element buffer.
+          - name: Build with sanitizers
+            os: ubuntu-22.04
+            cmake_args: >-
+              -DCMAKE_C_COMPILER=clang
+              -DCMAKE_CXX_COMPILER=clang++
+              -DCMAKE_C_FLAGS=-fsanitize=address,undefined\ -fno-sanitize-recover=all\ -g
+              -DCMAKE_CXX_FLAGS=-fsanitize=address,undefined\ -fno-sanitize-recover=all\ -g
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Install boost test
         run: sudo apt-get update && sudo apt-get install -y libboost-test-dev
       - name: Configure cmake
-        run: mkdir build && cd build && cmake -DNN_BUILD_TESTS=ON ../ci-build
+        run: cmake -S ci-build -B build ${{matrix.cmake_args}}
       - name: Build
         run: cmake --build build --parallel
       - name: Test
-        run: ./build/nn_test
+        run: ctest --test-dir build --output-on-failure

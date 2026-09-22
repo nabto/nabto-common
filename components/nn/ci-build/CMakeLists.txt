@@ -29,3 +29,6 @@ set(test_src
 
 add_executable(nn_test "${test_src}")
 target_link_libraries(nn_test PRIVATE Boost::unit_test_framework nn)
+
+enable_testing()
+add_test(NAME nn_test COMMAND nn_test)
