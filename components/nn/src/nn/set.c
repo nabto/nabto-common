@@ -26,7 +26,7 @@ bool nn_set_insert(struct nn_set* set, void* item)
     return true;
 }
 
-bool nn_set_equal(const struct nn_set* set, const void* lhs, const void* rhs)
+static bool nn_set_equal(const struct nn_set* set, const void* lhs, const void* rhs)
 {
     // if !(a < b) && !(b < a) => a == b
     if (!(set->less(lhs, rhs)) && !(set->less(rhs, lhs))) {
@@ -65,12 +65,12 @@ void nn_set_clear(struct nn_set* set)
     nn_vector_clear(&set->items);
 }
 
-bool nn_set_empty(struct nn_set* set)
+bool nn_set_empty(const struct nn_set* set)
 {
     return nn_vector_empty(&set->items);
 }
 
-size_t nn_set_size(struct nn_set* set)
+size_t nn_set_size(const struct nn_set* set)
 {
     return nn_vector_size(&set->items);
 }

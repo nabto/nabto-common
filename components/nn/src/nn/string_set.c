@@ -74,12 +74,12 @@ void nn_string_set_clear(struct nn_string_set* set)
     nn_vector_clear(&set->strings);
 }
 
-bool nn_string_set_empty(struct nn_string_set* set)
+bool nn_string_set_empty(const struct nn_string_set* set)
 {
     return nn_vector_empty(&set->strings);
 }
 
-size_t nn_string_set_size(struct nn_string_set* set)
+size_t nn_string_set_size(const struct nn_string_set* set)
 {
     return nn_vector_size(&set->strings);
 }

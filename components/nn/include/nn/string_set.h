@@ -49,12 +49,12 @@ void nn_string_set_clear(struct nn_string_set* set);
 /**
  * @return true iff the set is empty
  */
-bool nn_string_set_empty(struct nn_string_set* set);
+bool nn_string_set_empty(const struct nn_string_set* set);
 
 /**
  * @return the size of the set
  */
-size_t nn_string_set_size(struct nn_string_set* set);
+size_t nn_string_set_size(const struct nn_string_set* set);
 
 /**
  * Initialize the iterator to the first element in the set.

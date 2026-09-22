@@ -1,5 +1,7 @@
 #include <boost/test/unit_test.hpp>
 
+#include <string>
+
 #include <nn/ip_address.h>
 
 #include <cstring>
@@ -96,6 +98,29 @@ BOOST_AUTO_TEST_CASE(read_v4_rejects_invalid)
             BOOST_TEST(address.ip.v6[i] == 0xAB);
         }
     }
+}
+
+BOOST_AUTO_TEST_CASE(convert_v4_to_v4_mapped_in_place)
+{
+    // ip.v4 and ip.v6 share a union, so converting an address into itself
+    // used to zero the octets before they were read, yielding
+    // ::ffff:0.0.0.0.
+    struct nn_ip_address ip;
+    nn_ip_address_assign_v4(&ip, 0x7f000001);
+
+    nn_ip_convert_v4_to_v4_mapped(&ip, &ip);
+
+    BOOST_TEST(nn_ip_is_v6(&ip));
+    BOOST_TEST(nn_ip_is_v4_mapped(&ip));
+    BOOST_TEST(ip.ip.v6[12] == 127);
+    BOOST_TEST(ip.ip.v6[13] == 0);
+    BOOST_TEST(ip.ip.v6[14] == 0);
+    BOOST_TEST(ip.ip.v6[15] == 1);
+
+    struct nn_ip_address v4;
+    nn_ip_convert_v4_mapped_to_v4(&ip, &v4);
+    BOOST_TEST(nn_ip_is_v4(&v4));
+    BOOST_TEST(std::string(nn_ip_address_to_string(&v4)) == "127.0.0.1");
 }
 
 BOOST_AUTO_TEST_SUITE_END()
