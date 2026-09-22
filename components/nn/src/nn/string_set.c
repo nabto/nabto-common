@@ -16,7 +16,7 @@ void nn_string_set_deinit(struct nn_string_set* set)
     char* str;
     NN_VECTOR_FOREACH(&str, &set->strings)
     {
-        set->allocator.free(str);
+        nn_allocator_free(&set->allocator, str);
     }
     nn_vector_clear(&set->strings);
     nn_vector_deinit(&set->strings);
@@ -32,7 +32,7 @@ bool nn_string_set_insert(struct nn_string_set* set, const char* item)
         return false;
     }
     if (!nn_vector_push_back(&set->strings, &dup)) {
-        set->allocator.free(dup);
+        nn_allocator_free(&set->allocator, dup);
         return false;
     }
     return true;
@@ -58,7 +58,7 @@ void nn_string_set_erase(struct nn_string_set* set, const char* item)
         nn_vector_get(&set->strings, i, &e);
         if (strcmp(item, e) == 0) {
             nn_vector_erase(&set->strings, i);
-            set->allocator.free(e);
+            nn_allocator_free(&set->allocator, e);
             return;
         }
     }
@@ -69,7 +69,7 @@ void nn_string_set_clear(struct nn_string_set* set)
     char* str;
     NN_VECTOR_FOREACH(&str, &set->strings)
     {
-        set->allocator.free(str);
+        nn_allocator_free(&set->allocator, str);
     }
     nn_vector_clear(&set->strings);
 }

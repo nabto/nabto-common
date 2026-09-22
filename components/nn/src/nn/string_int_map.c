@@ -26,8 +26,8 @@ void nn_string_int_map_deinit(struct nn_string_int_map* map)
 void nn_string_int_map_destroy_item(struct nn_string_int_map* map, struct nn_string_int_map_item* item)
 {
     nn_llist_erase_node(&item->node);
-    map->allocator.free(item->key);
-    map->allocator.free(item);
+    nn_allocator_free(&map->allocator, item->key);
+    nn_allocator_free(&map->allocator, item);
 }
 
 struct nn_string_int_map_iterator nn_string_int_map_insert(struct nn_string_int_map* map, const char* key, int value)
@@ -40,10 +40,11 @@ struct nn_string_int_map_iterator nn_string_int_map_insert(struct nn_string_int_
         }
     }
 
-    struct nn_string_int_map_item* item = map->allocator.calloc(1, sizeof(struct nn_string_int_map_item));
+    struct nn_string_int_map_item* item = nn_allocator_calloc(&map->allocator, 1, sizeof(struct nn_string_int_map_item));
     char* keyDup = nn_strdup(key, &map->allocator);
     if (item == NULL || keyDup == NULL) {
-        map->allocator.free(item); map->allocator.free(keyDup);
+        nn_allocator_free(&map->allocator, item);
+        nn_allocator_free(&map->allocator, keyDup);
         return nn_string_int_map_end(map);
     }
 
