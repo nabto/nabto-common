@@ -73,6 +73,9 @@ void nn_vector_get(const struct nn_vector* vector, size_t index, void* element)
 
 void* nn_vector_reference(const struct nn_vector* vector, size_t index)
 {
+    if (vector->elements == NULL || index >= vector->used) {
+        return NULL;
+    }
     return (void*)((uint8_t*)vector->elements + (index * vector->itemSize));
 }
 

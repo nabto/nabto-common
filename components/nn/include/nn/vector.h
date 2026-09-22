@@ -47,6 +47,8 @@ void nn_vector_get(const struct nn_vector* vector, size_t index, void* element);
 
 /**
  * Get the pointer to the element at a specific index.
+ *
+ * @return NULL if the index is out of range or the vector is empty.
  */
 void* nn_vector_reference(const struct nn_vector* vector, size_t index);
 
@@ -77,6 +79,8 @@ void nn_vector_get_element(const struct nn_vector_iterator* it, void* element);
 
 /**
  * Get the reference to the element the iterator is at.
+ *
+ * @return NULL if the iterator is at the end.
  */
 void* nn_vector_get_reference(const struct nn_vector_iterator* it);
 
@@ -96,7 +100,12 @@ bool nn_vector_is_end(const struct nn_vector_iterator* it);
 #define NN_VECTOR_FOREACH(element, vector) for (struct nn_vector_iterator it = nn_vector_begin(vector); nn_vector_get_element(&it, element), !nn_vector_is_end(&it); nn_vector_next(&it))
 
 /**
- * Helper macro to iterate over all elements in the vector by their reference
+ * Helper macro to iterate over all elements in the vector by their
+ * reference
+ *
+ * The reference is assigned before the end of the vector is tested, so it
+ * is NULL on the iteration which terminates the loop. The loop body does
+ * not run then.
  */
 #define NN_VECTOR_FOREACH_REFERENCE(reference, vector) for (struct nn_vector_iterator it_##reference = nn_vector_begin(vector); reference = nn_vector_get_reference(&it_##reference), !nn_vector_is_end(&it_##reference); nn_vector_next(&it_##reference))
 

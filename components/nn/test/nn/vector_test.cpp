@@ -132,4 +132,50 @@ BOOST_AUTO_TEST_CASE(larger_elements)
 }
 
 
+BOOST_AUTO_TEST_CASE(reference_out_of_range_is_null)
+{
+    struct nn_vector vector;
+    nn_vector_init(&vector, sizeof(int), &defaultAllocator);
+
+    // An empty vector has no elements buffer at all; forming
+    // elements + index on it is undefined behaviour, so the bounds test
+    // has to come first.
+    BOOST_TEST(nn_vector_reference(&vector, 0) == nullptr);
+
+    int foo = 42;
+    nn_vector_push_back(&vector, &foo);
+    BOOST_TEST(nn_vector_reference(&vector, 0) != nullptr);
+    BOOST_TEST(nn_vector_reference(&vector, 1) == nullptr);
+    BOOST_TEST(nn_vector_reference(&vector, 4242) == nullptr);
+
+    // The capacity doubles ahead of used, so index 1 is inside the
+    // allocation here and would have been handed out unchecked.
+    nn_vector_clear(&vector);
+    BOOST_TEST(nn_vector_reference(&vector, 0) == nullptr);
+
+    nn_vector_deinit(&vector);
+}
+
+BOOST_AUTO_TEST_CASE(foreach_reference_over_an_empty_vector)
+{
+    // NN_VECTOR_FOREACH_REFERENCE assigns the reference before it tests
+    // for the end, so on an empty vector it used to form NULL + 0. That
+    // is what clang's -fsanitize=undefined reports as "applying zero
+    // offset to null pointer"; it reaches nn_set_insert through
+    // nn_set_contains on every first insert into a set.
+    struct nn_vector vector;
+    nn_vector_init(&vector, sizeof(int), &defaultAllocator);
+
+    size_t visited = 0;
+    void* reference;
+    NN_VECTOR_FOREACH_REFERENCE(reference, &vector)
+    {
+        visited++;
+    }
+    BOOST_TEST(visited == (size_t)0);
+    BOOST_TEST(reference == nullptr);
+
+    nn_vector_deinit(&vector);
+}
+
 BOOST_AUTO_TEST_SUITE_END()
