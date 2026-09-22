@@ -19,6 +19,7 @@ set(test_src
     ${test_dir}/nn/string_set_test.cpp
     ${test_dir}/nn/log_test.cpp
     ${test_dir}/nn/llist_test.cpp
+    ${test_dir}/nn/string_test.cpp
     ${test_dir}/nn/string_int_map_test.cpp
     ${test_dir}/nn/string_map_test.cpp
     ${test_dir}/nn/set_test.cpp

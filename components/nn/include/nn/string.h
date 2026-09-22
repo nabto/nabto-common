@@ -5,8 +5,14 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * like strdup, duplicate a null terminated c string.
+ *
+ * str must not be NULL.
  */
 char* nn_strdup(const char* str, struct nn_allocator* allocator);
 
@@ -23,6 +29,8 @@ char* nn_strdup(const char* str, struct nn_allocator* allocator);
  */
 bool nn_strcat(char* dst, size_t dstLen, const char* src);
 
-
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
 #endif
