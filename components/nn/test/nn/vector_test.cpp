@@ -3,8 +3,21 @@
 #include <nn/vector.h>
 #include <nn/allocator.h>
 
+#include <stdint.h>
+
 static struct nn_allocator defaultAllocator = {
     .calloc = &calloc,
+    .free = &free
+};
+
+static void* failing_calloc(size_t n, size_t size)
+{
+    (void)n; (void)size;
+    return NULL;
+}
+
+static struct nn_allocator failingAllocator = {
+    .calloc = &failing_calloc,
     .free = &free
 };
 
@@ -176,6 +189,36 @@ BOOST_AUTO_TEST_CASE(foreach_reference_over_an_empty_vector)
     BOOST_TEST(reference == nullptr);
 
     nn_vector_deinit(&vector);
+}
+
+BOOST_AUTO_TEST_CASE(push_back_refuses_to_overflow_the_capacity)
+{
+    // The growth is capacity*2 and the buffer is newCapacity*itemSize;
+    // neither product was checked, and the memcpy which follows the
+    // allocation uses the second one. Reaching the bound by pushing is not
+    // possible, so set the capacity up directly - struct nn_vector is
+    // public. push_back has to refuse before it allocates or copies
+    // anything, so no element is ever touched here.
+    struct nn_vector vector;
+    int item = 42;
+
+    // capacity*2 does not fit in a size_t.
+    nn_vector_init(&vector, 1, &defaultAllocator);
+    vector.used = vector.capacity = (SIZE_MAX / 2) + 1;
+    BOOST_TEST(!nn_vector_push_back(&vector, &item));
+
+    // capacity*2 fits, but the buffer it needs does not.
+    nn_vector_init(&vector, 8, &defaultAllocator);
+    vector.used = vector.capacity = SIZE_MAX / 4;
+    BOOST_TEST(!nn_vector_push_back(&vector, &item));
+
+    // One below the bound the guard lets it through, and the allocation
+    // fails instead of wrapping. A real allocator is asked for the huge
+    // buffer here, so use one which reports failure the way an embedded
+    // allocator does rather than one which aborts the process.
+    nn_vector_init(&vector, 2, &failingAllocator);
+    vector.used = vector.capacity = SIZE_MAX / 4;
+    BOOST_TEST(!nn_vector_push_back(&vector, &item));
 }
 
 BOOST_AUTO_TEST_SUITE_END()
