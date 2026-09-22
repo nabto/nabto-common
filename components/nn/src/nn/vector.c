@@ -20,12 +20,37 @@ void nn_vector_deinit(struct nn_vector* vector)
     vector->itemSize = 0;
 }
 
+/**
+ * Compute the capacity a full vector grows to: double it, starting from
+ * one. Returns false if either the capacity or the buffer it would need
+ * does not fit in a size_t, since nothing below checks the product
+ * newCapacity * itemSize - libc calloc does, but a custom allocator is
+ * not obliged to, and the memcpy which follows uses the same product.
+ */
+static bool nn_vector_next_capacity(const struct nn_vector* vector, size_t* newCapacity)
+{
+    size_t capacity = vector->capacity;
+    if (capacity == 0) {
+        capacity = 1;
+    } else {
+        if (capacity > SIZE_MAX / 2) {
+            return false;
+        }
+        capacity = capacity * 2;
+    }
+    if (vector->itemSize != 0 && capacity > SIZE_MAX / vector->itemSize) {
+        return false;
+    }
+    *newCapacity = capacity;
+    return true;
+}
+
 bool nn_vector_push_back(struct nn_vector* vector, void* element)
 {
     if (vector->used == vector->capacity) {
-        size_t newCapacity = vector->capacity*2;
-        if (newCapacity == 0) {
-            newCapacity = 1;
+        size_t newCapacity;
+        if (!nn_vector_next_capacity(vector, &newCapacity)) {
+            return false;
         }
         void** newElements = nn_allocator_calloc(&vector->allocator, newCapacity, vector->itemSize);
         if (newElements == NULL) {
