@@ -75,12 +75,23 @@ struct nn_llist_iterator nn_llist_append(struct nn_llist* list, struct nn_llist_
 void nn_llist_insert_before(struct nn_llist_iterator* iterator, struct nn_llist_node* node, void* item);
 
 /**
- * Remove the node from the list pointed to by the iterator
+ * Remove the node from the list pointed to by the iterator.
+ *
+ * The iterator is invalid afterwards: it must not be advanced,
+ * compared or dereferenced. An erased node points at itself, so
+ * nn_llist_next() does not move it and nn_llist_is_end() never becomes
+ * true - continuing the iteration is an endless loop.
+ *
+ * To erase while iterating, advance a copy of the iterator first and
+ * erase the node it left behind with nn_llist_erase_node().
  */
 void nn_llist_erase(struct nn_llist_iterator* iterator);
 
 /**
  * remove the node from the list
+ *
+ * Any iterator positioned on this node is invalid afterwards, see
+ * nn_llist_erase().
  */
 void nn_llist_erase_node(struct nn_llist_node* node);
 
@@ -118,6 +129,9 @@ void* nn_llist_get_item(const struct nn_llist_iterator* iterator);
  * NN_LIST_FOREACH(item, &list) {
  *   ...
  * }
+ *
+ * Do not erase the current element inside the loop; the iterator does
+ * not survive it. See nn_llist_erase().
  */
 #define NN_LLIST_FOREACH(item, list) for (struct nn_llist_iterator it_##item = nn_llist_begin(list); item = nn_llist_get_item(&it_##item), !nn_llist_is_end(&it_##item); nn_llist_next(&it_##item))
 
