@@ -96,4 +96,20 @@ BOOST_AUTO_TEST_CASE(iterator)
 }
 
 
+BOOST_AUTO_TEST_CASE(insert_into_an_empty_set)
+{
+    // nn_set_insert consults nn_set_contains first, which iterates the
+    // still-empty vector by reference. Under clang
+    // -fsanitize=address,undefined this was the one report in the suite.
+    struct nn_set set;
+    nn_set_init(&set, sizeof(int), int_less, &defaultAllocator);
+
+    int item = 42;
+    BOOST_TEST(nn_set_insert(&set, &item));
+    BOOST_TEST(nn_set_size(&set) == (size_t)1);
+    BOOST_TEST(nn_set_contains(&set, &item));
+
+    nn_set_deinit(&set);
+}
+
 BOOST_AUTO_TEST_SUITE_END();
