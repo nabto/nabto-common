@@ -12,7 +12,7 @@ void nn_log_init(struct nn_log* logger, nn_log_print logPrint, void* userData)
 
 void nn_log_error_adapter(struct nn_log* logger, const char* module, const char* fmt, ...)
 {
-    if (logger == NULL) {
+    if (logger == NULL || logger->logPrint == NULL) {
         return;
     }
     va_list args;
@@ -22,7 +22,7 @@ void nn_log_error_adapter(struct nn_log* logger, const char* module, const char*
 }
 void nn_log_warn_adapter(struct nn_log* logger, const char* module, const char* fmt, ...)
 {
-    if (logger == NULL) {
+    if (logger == NULL || logger->logPrint == NULL) {
         return;
     }
     va_list args;
@@ -32,7 +32,7 @@ void nn_log_warn_adapter(struct nn_log* logger, const char* module, const char* 
 }
 void nn_log_info_adapter(struct nn_log* logger, const char* module, const char* fmt, ...)
 {
-    if (logger == NULL) {
+    if (logger == NULL || logger->logPrint == NULL) {
         return;
     }
     va_list args;
@@ -42,7 +42,7 @@ void nn_log_info_adapter(struct nn_log* logger, const char* module, const char* 
 }
 void nn_log_trace_adapter(struct nn_log* logger, const char* module, const char* fmt, ...)
 {
-    if (logger == NULL) {
+    if (logger == NULL || logger->logPrint == NULL) {
         return;
     }
     va_list args;
@@ -54,7 +54,7 @@ void nn_log_trace_adapter(struct nn_log* logger, const char* module, const char*
 #else
 void nn_log_adapter(struct nn_log* logger, enum nn_log_severity severity, const char* module, const char* file, int line, ...)
 {
-    if (logger == NULL) {
+    if (logger == NULL || logger->logPrint == NULL) {
         return;
     }
     va_list args;

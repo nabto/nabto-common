@@ -1,6 +1,8 @@
 #include <boost/test/unit_test.hpp>
 #include <nn/log.h>
 
+#include <string.h>
+
 struct log_message {
     enum nn_log_severity severity;
     const char* module;
@@ -55,6 +57,20 @@ BOOST_AUTO_TEST_CASE(test)
 BOOST_AUTO_TEST_CASE(null_logger)
 {
     NN_LOG_ERROR(NULL, logModule, "host %s port %d", "127.0.0.1", 4242);
+}
+
+BOOST_AUTO_TEST_CASE(logger_without_a_print_function)
+{
+    // A logger which has not had a print function installed yet has to be
+    // safe to log through: on an embedded target the integrator's context
+    // struct is commonly zeroed long before the log handler is set up.
+    struct nn_log logger;
+    memset(&logger, 0, sizeof(logger));
+    NN_LOG_ERROR(&logger, logModule, "host %s port %d", "127.0.0.1", 4242);
+
+    // ... and so does one initialised without a print function.
+    nn_log_init(&logger, NULL, NULL);
+    NN_LOG_TRACE(&logger, logModule, "no print function installed");
 }
 
 BOOST_AUTO_TEST_SUITE_END()

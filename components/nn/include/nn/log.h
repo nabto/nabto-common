@@ -34,6 +34,10 @@ struct nn_log {
 
 /**
  * Initialize the logger with the given logFunction and userData.
+ *
+ * logPrint may be NULL, and a struct nn_log which has simply been
+ * zeroed is valid too. Logging through either is a no-op rather than a
+ * call through a NULL pointer.
  */
 void nn_log_init(struct nn_log* logger, nn_log_print logPrint, void* userData);
 
