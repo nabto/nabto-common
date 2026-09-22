@@ -58,6 +58,13 @@ void nn_string_int_map_erase(struct nn_string_int_map* map, const char* key);
 
 /**
  * erase a key from the map based on its iterator.
+ *
+ * The item is freed, so the iterator is left dangling: advancing,
+ * comparing or dereferencing it afterwards is a use after free.
+ *
+ * To erase while walking the map, collect the keys to remove first and
+ * then call nn_string_int_map_erase() for each, or restart the
+ * iteration from nn_string_int_map_begin() after every erase.
  */
 void nn_string_int_map_erase_iterator(struct nn_string_int_map* map, struct nn_string_int_map_iterator* it);
 
