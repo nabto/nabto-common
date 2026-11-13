@@ -187,8 +187,15 @@ nabto_stream_status nabto_stream_read_buffer_once(struct nabto_stream* stream, u
         *readen = avail;
         NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "Retrieving data from seq=%" NN_LOG_PRIu32 " size=%i", segment->seq, (uint16_t)avail);
         if (segment->size == segment->used) {
+            bool windowWasClosed = (nabto_stream_get_recv_window_size(stream) == 0);
             nabto_stream_remove_segment_from_recv_list(segment);
+            stream->recvReadSize--;
             nabto_stream_free_recv_segment(stream, segment);
+            if (windowWasClosed && nabto_stream_get_recv_window_size(stream) > 0) {
+                // Tell the peer the window is open again, rather than
+                // leave it to find out with a probe after a timeout.
+                stream->imediateAck = true;
+            }
             nabto_stream_module_notify_event(stream, NABTO_STREAM_MODULE_EVENT_DATA_READ);
         }
 

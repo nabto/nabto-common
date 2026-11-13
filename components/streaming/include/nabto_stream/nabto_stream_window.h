@@ -375,6 +375,9 @@ struct nabto_stream {
     // reader.
     struct nabto_stream_recv_segment recvReadSentinel;
     struct nabto_stream_recv_segment* recvRead;
+    // Number of segments in recvRead. They hold data the application has
+    // not read yet and count against the advertised recv window.
+    uint32_t                          recvReadSize;
 
     // recv window partially filled with data from the other peer.
     struct nabto_stream_recv_segment recvWindowSentinel;
