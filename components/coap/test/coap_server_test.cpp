@@ -2068,4 +2068,29 @@ BOOST_AUTO_TEST_CASE(resource_removed_during_block1_transfer_gets_not_found)
     BOOST_TEST(s.requests.activeRequests == 0u);
 }
 
+// An observe registration whose connection went away while the
+// application had the request is refused, rather than leaving an
+// observer behind that notifications would be queued for with no
+// connection to send them on.
+BOOST_AUTO_TEST_CASE(accept_observe_after_connection_removed_is_refused)
+{
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x1701, "t1", "test", 0).build());
+    BOOST_TEST(s.drain().size() == 1u); // empty ACK
+    BOOST_REQUIRE(s.request != NULL);
+
+    nabto_coap_server_remove_connection(&s.requests, s.connection());
+    BOOST_TEST(nabto_coap_server_request_accept_observe(s.request) == NABTO_COAP_ERROR_NO_CONNECTION);
+    BOOST_TEST(s.observerCount() == 0u);
+
+    nabto_coap_server_response_set_code(s.request, NABTO_COAP_CODE_CONTENT);
+    BOOST_TEST(nabto_coap_server_response_ready(s.request) == NABTO_COAP_ERROR_NO_CONNECTION);
+    nabto_coap_server_request_free(s.request);
+    s.request = NULL;
+
+    BOOST_TEST(nabto_coap_server_resource_notify(&s.requests, s.getResource, NABTO_COAP_CODE_CONTENT, 0, "hi", 2) == NABTO_COAP_ERROR_OK);
+    BOOST_TEST(nabto_coap_server_next_event(&s.requests) != NABTO_COAP_SERVER_NEXT_EVENT_SEND);
+    BOOST_TEST(s.requests.activeRequests == 0u);
+}
+
 BOOST_AUTO_TEST_SUITE_END()
