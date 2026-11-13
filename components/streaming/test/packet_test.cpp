@@ -5,6 +5,7 @@
 #include <nabto_stream/nabto_stream_protocol.h>
 #include <nabto_stream/nabto_stream_window.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -1054,6 +1055,242 @@ BOOST_AUTO_TEST_CASE(unread_in_order_data_closes_the_window)
     handle(&f.stream, dataPacket(window + 1, 4));
     BOOST_TEST(f.stream.recvTop == window + 1);
     BOOST_TEST(advertisedWindow(&f.stream) == 0u);
+}
+
+// Window probe (wsrf.md, "Window probe")
+
+namespace {
+
+void noApplicationEvents(nabto_stream_application_event_type eventType, void* data)
+{
+    (void)eventType;
+    (void)data;
+}
+
+/**
+ * Close the window with everything sent acked and one segment queued
+ * behind it: window 4, segments 1..5 sent (the first send may go one past
+ * the window), all acked with a window of 0, then 6 written.
+ */
+void closeWindowWithDataWaiting(SenderFixture& f)
+{
+    nabto_stream_set_application_event_callback(&f.stream, &noApplicationEvents, NULL);
+    f.write(5);
+    f.send();
+    nabto_stream_event_handled(&f.stream, ET_DATA);
+    BOOST_REQUIRE(f.unacked() == seqs(1, 5));
+    f.ack(5, 0);
+    f.write(1);
+    BOOST_REQUIRE(f.unacked().empty());
+    BOOST_REQUIRE(f.sendList() == seqs(6, 6));
+}
+
+/**
+ * Handle the stream's events which need no peer until it has to wait.
+ * Pending acks count as sent; the peer here is the test.
+ */
+enum nabto_stream_next_event_type settle(struct nabto_stream* stream)
+{
+    for (;;) {
+        enum nabto_stream_next_event_type e = nabto_stream_next_event_to_handle(stream);
+        if (e == ET_APPLICATION_EVENT) {
+            nabto_stream_dispatch_event(stream);
+        } else if (e == ET_ACK) {
+            nabto_stream_event_handled(stream, ET_ACK);
+        } else {
+            return e;
+        }
+    }
+}
+
+/** Let the retransmission timeout pass and send the probe it allows. */
+void probe(SenderFixture& f)
+{
+    f.stamp += 100000;
+    BOOST_REQUIRE(settle(&f.stream) == ET_TIMEOUT);
+    nabto_stream_handle_timeout(&f.stream);
+    nabto_stream_event_handled(&f.stream, ET_TIMEOUT);
+    BOOST_REQUIRE(settle(&f.stream) == ET_DATA);
+    f.send();
+    nabto_stream_event_handled(&f.stream, ET_DATA);
+}
+
+} // namespace
+
+BOOST_AUTO_TEST_CASE(closed_window_with_nothing_in_flight_is_probed)
+{
+    // The ack which reopens the window is not retransmitted. With nothing
+    // unacked there was no retransmission timeout to let a segment past the
+    // window, so losing that ack stalled the stream for good.
+    SenderFixture f(4);
+    closeWindowWithDataWaiting(f);
+
+    // The timer is still needed, so the stream must not report NOTHING.
+    BOOST_TEST(settle(&f.stream) == ET_WAIT);
+
+    uint32_t rto = f.stream.cCtrl.rto;
+    probe(f);
+    BOOST_TEST(f.stream.cCtrl.rto == 2 * rto);
+    BOOST_TEST(f.unacked() == seqs(6, 6));
+    BOOST_TEST(f.sendList().empty());
+}
+
+BOOST_AUTO_TEST_CASE(window_probe_backs_off_until_the_window_opens)
+{
+    SenderFixture f(4);
+    closeWindowWithDataWaiting(f);
+    probe(f);
+
+    // The window is still closed: the receiver drops the probe and acks
+    // what it had. The probe goes again after a doubled timeout.
+    f.ack(5, 0);
+    BOOST_TEST(f.unacked() == seqs(6, 6));
+    BOOST_TEST(settle(&f.stream) == ET_WAIT);
+    uint32_t rto = f.stream.cCtrl.rto;
+    probe(f);
+    BOOST_TEST(f.stream.cCtrl.rto == std::min(2 * rto, (uint32_t)NABTO_STREAM_MAX_RETRANSMISSION_TIME));
+    BOOST_TEST(f.unacked() == seqs(6, 6));
+
+    // The window has opened: the probe is acked and there is nothing more
+    // to send or probe.
+    f.ack(6, 4);
+    BOOST_TEST(f.unacked().empty());
+    BOOST_TEST(f.sendList().empty());
+    BOOST_TEST(settle(&f.stream) == ET_NOTHING);
+}
+
+BOOST_AUTO_TEST_CASE(closed_window_without_data_waiting_is_not_probed)
+{
+    SenderFixture f(4);
+    nabto_stream_set_application_event_callback(&f.stream, &noApplicationEvents, NULL);
+    f.write(4);
+    f.send();
+    nabto_stream_event_handled(&f.stream, ET_DATA);
+    f.ack(4, 0);
+    BOOST_REQUIRE(f.unacked().empty());
+    BOOST_REQUIRE(f.sendList().empty());
+
+    BOOST_TEST(settle(&f.stream) == ET_NOTHING);
+    f.stamp += 100000;
+    BOOST_TEST(settle(&f.stream) == ET_NOTHING);
+}
+
+namespace {
+
+/**
+ * Handle every event of `from` until it has to wait, delivering the
+ * packets it sends to `to` unless `deliver` is false. A responder is
+ * accepted as soon as it asks to be. Returns the number of packets sent.
+ */
+size_t pump(struct nabto_stream* from, struct nabto_stream* to, bool deliver = true)
+{
+    size_t sent = 0;
+    for (size_t i = 0; i < 1000000; i++) {
+        enum nabto_stream_next_event_type e = nabto_stream_next_event_to_handle(from);
+        switch (e) {
+            case ET_ACCEPT:
+                nabto_stream_event_handled(from, e);
+                nabto_stream_accept(from);
+                break;
+            case ET_SYN:
+            case ET_SYN_ACK:
+            case ET_ACK:
+            case ET_DATA:
+            case ET_RST: {
+                std::vector<uint8_t> buf(1500);
+                size_t n = nabto_stream_create_packet(from, buf.data(), buf.size(), e);
+                BOOST_REQUIRE(n > 0u);
+                buf.resize(n);
+                nabto_stream_event_handled(from, e);
+                sent++;
+                if (deliver) {
+                    handle(to, buf);
+                }
+                break;
+            }
+            case ET_TIMEOUT:
+                nabto_stream_handle_timeout(from);
+                nabto_stream_event_handled(from, e);
+                break;
+            case ET_APPLICATION_EVENT:
+                nabto_stream_dispatch_event(from);
+                break;
+            default:
+                return sent;
+        }
+    }
+    BOOST_FAIL("stream never settled");
+    return sent;
+}
+
+/** Pump both ways until neither end sends anything. */
+void converge(struct nabto_stream* a, struct nabto_stream* b)
+{
+    for (size_t i = 0; i < 100000; i++) {
+        if (pump(a, b) + pump(b, a) == 0) {
+            return;
+        }
+    }
+    BOOST_FAIL("streams never converged");
+}
+
+/** Write 100 byte chunks until the stream takes no more. */
+void writeAll(struct nabto_stream* stream)
+{
+    const uint8_t data[100] = { 0 };
+    for (;;) {
+        size_t written = 0;
+        BOOST_REQUIRE(nabto_stream_write_buffer(stream, data, sizeof(data), &written) == NABTO_STREAM_STATUS_OK);
+        if (written == 0) {
+            return;
+        }
+    }
+}
+
+} // namespace
+
+BOOST_AUTO_TEST_CASE(receiver_which_stops_reading_recovers_through_the_probe)
+{
+    // The whole path between two streams. The receiver's application stops
+    // reading, so its window closes with everything the sender sent acked.
+    // When the application reads again the ack which reopens the window is
+    // lost, and only the sender's probe can restart the transfer.
+    StreamFixture sender;
+    StreamFixture receiver;
+    sender.initiator();
+    receiver.responder();
+    sender.stream.disableReplayProtection = true;
+    nabto_stream_set_application_event_callback(&sender.stream, &noApplicationEvents, NULL);
+    nabto_stream_set_application_event_callback(&receiver.stream, &noApplicationEvents, NULL);
+    nabto_stream_open(&sender.stream, 0);
+    converge(&sender.stream, &receiver.stream);
+    BOOST_REQUIRE(sender.stream.state == ST_ESTABLISHED);
+    BOOST_REQUIRE(receiver.stream.state == ST_ESTABLISHED);
+
+    for (size_t i = 0; i < 100000 && nabto_stream_get_recv_window_size(&receiver.stream) > 0; i++) {
+        writeAll(&sender.stream);
+        converge(&sender.stream, &receiver.stream);
+    }
+    writeAll(&sender.stream);
+    converge(&sender.stream, &receiver.stream);
+    BOOST_REQUIRE(nabto_stream_get_recv_window_size(&receiver.stream) == 0u);
+    BOOST_REQUIRE(sender.stream.unacked->nextUnacked == sender.stream.unacked);
+    BOOST_REQUIRE(sender.stream.sendList->nextSend != sender.stream.sendList);
+    uint32_t recvTop = receiver.stream.recvTop;
+
+    // The application reads one segment; the ack reopening the window is lost.
+    uint8_t buf[100];
+    size_t read = 0;
+    BOOST_REQUIRE(nabto_stream_read_buffer(&receiver.stream, buf, sizeof(buf), &read) == NABTO_STREAM_STATUS_OK);
+    BOOST_REQUIRE(read == sizeof(buf));
+    BOOST_REQUIRE(pump(&receiver.stream, &sender.stream, false) == 1u);
+    converge(&sender.stream, &receiver.stream);
+    BOOST_TEST(receiver.stream.recvTop == recvTop);
+
+    // After the retransmission timeout the sender probes and gets through.
+    sender.stamp += 100000;
+    converge(&sender.stream, &receiver.stream);
+    BOOST_TEST(receiver.stream.recvTop == recvTop + 1);
 }
 
 BOOST_AUTO_TEST_CASE(two_segments_in_one_packet_are_both_accepted)
