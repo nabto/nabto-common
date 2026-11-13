@@ -411,6 +411,18 @@ void nabto_coap_server_handle_data_for_request(struct nabto_coap_server_requests
         }
     }
 
+    if (block1Done && request->resource->handler == NULL) {
+        // The resource was removed with nabto_coap_server_remove_resource
+        // while the request was being received. Answer as if it never
+        // existed rather than call through the cleared handler.
+        nabto_coap_server_make_error_response(requests, request->connection, message, NABTO_COAP_CODE_NOT_FOUND, NULL);
+        // User will never see this request, so we free for him
+        request->isFreed = true;
+        request->state = NABTO_COAP_SERVER_REQUEST_STATE_DONE;
+        nabto_coap_server_free_request(request);
+        return;
+    }
+
     if (message->type == NABTO_COAP_TYPE_CON && !request->hasBlock1Ack) {
         nabto_coap_server_queue_ack(requests, request->connection, message->messageId);
     }

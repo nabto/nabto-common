@@ -179,9 +179,8 @@ class TestServer {
         BOOST_REQUIRE(nabto_coap_server_init(&server, NULL, &countingAllocator) == NABTO_COAP_ERROR_OK);
         BOOST_REQUIRE(nabto_coap_server_requests_init(&requests, &server, &TestServer::getStamp, &TestServer::notifyEvent, this) == NABTO_COAP_ERROR_OK);
         const char* path[] = { "test", NULL };
-        struct nabto_coap_server_resource* resource;
         BOOST_REQUIRE(nabto_coap_server_add_resource(&server, NABTO_COAP_CODE_GET, path, &TestServer::handler, this, &getResource) == NABTO_COAP_ERROR_OK);
-        BOOST_REQUIRE(nabto_coap_server_add_resource(&server, NABTO_COAP_CODE_POST, path, &TestServer::handler, this, &resource) == NABTO_COAP_ERROR_OK);
+        BOOST_REQUIRE(nabto_coap_server_add_resource(&server, NABTO_COAP_CODE_POST, path, &TestServer::handler, this, &postResource) == NABTO_COAP_ERROR_OK);
     }
     ~TestServer()
     {
@@ -356,6 +355,7 @@ class TestServer {
     struct nabto_coap_server server;
     struct nabto_coap_server_requests requests;
     struct nabto_coap_server_resource* getResource = NULL;
+    struct nabto_coap_server_resource* postResource = NULL;
     struct nabto_coap_server_request* request = NULL; // most recent
     std::vector<struct nabto_coap_server_request*> pendingRequests;
     size_t handlerCalls = 0;
@@ -2000,6 +2000,29 @@ BOOST_AUTO_TEST_CASE(malformed_parameter_segment_is_rejected)
 
     nabto_coap_server_destroy(&server);
     BOOST_TEST(liveAllocations == allocationsBefore);
+}
+
+// A Block1 transfer holds on to the resource it was started for. If
+// the resource is removed before the last chunk arrives, the request is
+// answered 4.04 instead of being handed to the cleared handler.
+BOOST_AUTO_TEST_CASE(resource_removed_during_block1_transfer_gets_not_found)
+{
+    TestServer s;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0x1601, "t1").block1(0, true, 0).payload(std::string(16, 'a')).build());
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_CONTINUE);
+
+    nabto_coap_server_remove_resource(s.postResource);
+
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_POST, 0x1602, "t1").block1(1, false, 0).payload("b").build());
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_NOT_FOUND);
+    BOOST_TEST(sent[0].messageId == 0x1602);
+    BOOST_TEST(s.handlerCalls == 0u);
+    BOOST_TEST(s.requests.activeRequests == 0u);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
