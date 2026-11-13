@@ -952,6 +952,18 @@ void nabto_coap_client_remove_connection(struct nabto_coap_client* client, void 
         }
         request = request->next;
     }
+
+    // A queued ACK or RST for the connection would otherwise be handed to
+    // the integrator by nabto_coap_client_create_packet, along with the
+    // connection it has just removed.
+    if (client->needSendRst && client->connectionRst == connection) {
+        client->needSendRst = false;
+        client->connectionRst = NULL;
+    }
+    if (client->needSendAck && client->connectionAck == connection) {
+        client->needSendAck = false;
+        client->connectionAck = NULL;
+    }
     client->notifyEvent(client->userData);
 }
 

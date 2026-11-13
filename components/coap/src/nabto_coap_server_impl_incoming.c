@@ -699,6 +699,11 @@ struct nabto_coap_server_request* nabto_coap_server_request_new(struct nabto_coa
         return NULL;
     }
 
+    // Not in the requests list until handle_new_request has finished
+    // setting it up. Pointing at itself keeps the unlink in free_request
+    // harmless if setup fails before then.
+    request->next = request;
+    request->prev = request;
     request->parameterSentinel.next = &request->parameterSentinel;
     request->parameterSentinel.prev = &request->parameterSentinel;
     request->isFreed = false;
