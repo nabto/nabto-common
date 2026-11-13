@@ -180,7 +180,8 @@ bool nabto_coap_server_request_is_observe(struct nabto_coap_server_request* requ
  * allocated or the limit set with nabto_coap_server_limit_observers
  * has been reached; the handler then answers the request as it sees
  * fit, e.g. 5.03 Service Unavailable, or as a plain GET without
- * observe.
+ * observe. Returns NABTO_COAP_ERROR_NO_CONNECTION if the connection
+ * has been removed since the request arrived.
  */
 nabto_coap_error nabto_coap_server_request_accept_observe(struct nabto_coap_server_request* request);
 

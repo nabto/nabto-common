@@ -1062,6 +1062,12 @@ nabto_coap_error nabto_coap_server_request_accept_observe(struct nabto_coap_serv
     if (!request->isObserveRegister) {
         return NABTO_COAP_ERROR_INVALID_PARAMETER;
     }
+    if (request->connection == NULL) {
+        // The connection was removed while the application had the
+        // request. An observer for it could never be sent to, and would
+        // have the send path report a packet for a NULL connection.
+        return NABTO_COAP_ERROR_NO_CONNECTION;
+    }
     struct nabto_coap_server_requests* requests = request->requests;
     struct nabto_coap_server* server = requests->server;
 
