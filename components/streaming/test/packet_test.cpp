@@ -981,9 +981,15 @@ BOOST_AUTO_TEST_CASE(advertised_window_tracks_recv_top)
     // filled because find_recv_buffer rejects it.
     BOOST_TEST(f.counts.recvAllocs == window + 1);
 
-    // filling the hole reopens the whole window.
+    // filling the hole hands the whole window to the application, and the
+    // window stays closed until it has been read.
     handle(&f.stream, dataPacket(1, 4));
     BOOST_TEST(f.stream.recvTop == window);
+    BOOST_TEST(advertisedWindow(&f.stream) == 0u);
+    std::vector<uint8_t> buf(4 * window);
+    size_t read = 0;
+    BOOST_TEST(nabto_stream_read_buffer(&f.stream, buf.data(), buf.size(), &read) == NABTO_STREAM_STATUS_OK);
+    BOOST_TEST(read == buf.size());
     BOOST_TEST(advertisedWindow(&f.stream) == window);
 }
 
@@ -1015,10 +1021,39 @@ BOOST_AUTO_TEST_CASE(closed_window_rejects_data_without_calling_the_allocator)
     BOOST_TEST(f.counts.recvAllocs == 2u);
     BOOST_TEST(f.stream.recvSegmentAllocationStamp.type == NABTO_STREAM_STAMP_INFINITE);
     BOOST_TEST(f.stream.imediateAck);
-    BOOST_TEST(advertisedWindow(&f.stream) == (uint32_t)NABTO_STREAM_MAX_RECV_SEGMENTS);
+    // less the segment at 1, which has not been read.
+    BOOST_TEST(advertisedWindow(&f.stream) == (uint32_t)NABTO_STREAM_MAX_RECV_SEGMENTS - 1);
 
     handle(&f.stream, dataPacket(2, 4));
     BOOST_TEST(f.stream.recvTop == 2u);
+}
+
+BOOST_AUTO_TEST_CASE(unread_in_order_data_closes_the_window)
+{
+    // Segments received in order move to the read list. They used to stop
+    // counting against the window there, so a peer could keep an
+    // application which does not read taking data without bound.
+    const uint32_t window = NABTO_STREAM_MAX_RECV_SEGMENTS;
+    CountingFixture f;
+    for (uint32_t seq = 1; seq <= window + 50; seq++) {
+        handle(&f.stream, dataPacket(seq, 4));
+    }
+    BOOST_TEST(f.stream.recvTop == window);
+    BOOST_TEST(f.counts.recvAllocs <= (size_t)window + 1);
+    BOOST_TEST(advertisedWindow(&f.stream) == 0u);
+
+    // Reading one segment reopens the window and tells the peer at once.
+    f.stream.imediateAck = false;
+    uint8_t buf[4];
+    size_t read = 0;
+    BOOST_TEST(nabto_stream_read_buffer(&f.stream, buf, sizeof(buf), &read) == NABTO_STREAM_STATUS_OK);
+    BOOST_TEST(read == 4u);
+    BOOST_TEST(f.stream.imediateAck);
+    BOOST_TEST(advertisedWindow(&f.stream) == 1u);
+
+    handle(&f.stream, dataPacket(window + 1, 4));
+    BOOST_TEST(f.stream.recvTop == window + 1);
+    BOOST_TEST(advertisedWindow(&f.stream) == 0u);
 }
 
 BOOST_AUTO_TEST_CASE(two_segments_in_one_packet_are_both_accepted)

@@ -850,6 +850,7 @@ void nabto_stream_move_segments_from_recv_window_to_recv_read(struct nabto_strea
         struct nabto_stream_recv_segment* next = iterator->next;
         nabto_stream_remove_segment_from_recv_list(iterator);
         nabto_stream_add_segment_to_recv_list_before_elm(stream->recvRead, iterator);
+        stream->recvReadSize++;
         stream->recvTop = iterator->seq;
         iterator = next;
         stream->applicationEvents.dataReady = true;
@@ -860,8 +861,10 @@ uint32_t nabto_stream_get_recv_window_size(struct nabto_stream* stream)
 {
     // The window is sent together with recvMax as maxAcked, so it is
     // relative to recvMax: the peer may send up to recvMax + window =
-    // recvTop + NABTO_STREAM_MAX_RECV_SEGMENTS. find_recv_buffer accepts
-    // exactly that.
+    // recvTop + NABTO_STREAM_MAX_RECV_SEGMENTS - recvReadSize.
+    // find_recv_buffer accepts exactly that. Segments received in order
+    // but not read yet by the application count too, or a peer could
+    // keep sending to an application which does not read.
     if (stream->recvSegmentAllocationStamp.type == NABTO_STREAM_STAMP_FUTURE) {
         // a recv segment could not be allocated, the window is closed until
         // the retry succeeds and a new ack is sent.
@@ -872,10 +875,13 @@ uint32_t nabto_stream_get_recv_window_size(struct nabto_stream* stream)
         // explicitly instead of deriving it from the retry timestamp.
         return 0;
     }
-    uint32_t used = stream->recvMax - stream->recvTop;
-    if (used >= NABTO_STREAM_MAX_RECV_SEGMENTS) {
+    uint32_t outOfOrder = stream->recvMax - stream->recvTop;
+    if (outOfOrder >= NABTO_STREAM_MAX_RECV_SEGMENTS ||
+        stream->recvReadSize >= NABTO_STREAM_MAX_RECV_SEGMENTS - outOfOrder)
+    {
         return 0;
     }
+    uint32_t used = outOfOrder + stream->recvReadSize;
     return NABTO_STREAM_MAX_RECV_SEGMENTS - used;
 }
 
