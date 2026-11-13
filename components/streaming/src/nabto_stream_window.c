@@ -155,6 +155,7 @@ void nabto_stream_init_initiator(struct nabto_stream* stream) {
 void nabto_stream_init_responder(struct nabto_stream* stream, uint8_t nonce[8])
 {
     stream->nonceValidated = false;
+    stream->isResponder = true;
     memcpy(stream->nonce, nonce, NABTO_STREAM_NONCE_SIZE);
 }
 

@@ -469,6 +469,11 @@ struct nabto_stream {
      * nonce has been validated.
      */
     bool nonceValidated;
+    /**
+     * Set by nabto_stream_init_responder. A responder never sends a syn,
+     * so a syn|ack is not an answer to anything it did and is ignored.
+     */
+    bool isResponder;
 };
 
 /******************************************************************************/

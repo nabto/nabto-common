@@ -93,4 +93,23 @@ BOOST_AUTO_TEST_CASE(getn_key_not_terminated)
     nn_string_map_deinit(&map);
 }
 
+// A lookup key with a NUL where a stored key ends is not that key. The
+// old prefix check stopped at the NUL and then read the stored key at
+// keyLength, past its end.
+BOOST_AUTO_TEST_CASE(getn_key_with_embedded_nul)
+{
+    struct nn_string_map map;
+    nn_string_map_init(&map, &defaultAllocator);
+    nn_string_map_insert(&map, "ab", "v");
+
+    const char key[] = { 'a', 'b', '\0', 'x', 'y', 'z' };
+    struct nn_string_map_iterator it = nn_string_map_getn(&map, key, sizeof(key));
+    BOOST_TEST(nn_string_map_is_end(&it));
+
+    it = nn_string_map_getn(&map, key, 2);
+    BOOST_TEST(!nn_string_map_is_end(&it));
+
+    nn_string_map_deinit(&map);
+}
+
 BOOST_AUTO_TEST_SUITE_END()

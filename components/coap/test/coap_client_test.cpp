@@ -793,4 +793,35 @@ BOOST_AUTO_TEST_CASE(response_over_the_limit_is_rejected)
     }
 }
 
+// An ACK or RST queued for a connection is dropped when the connection
+// is removed. Otherwise create_packet hands the removed connection back
+// to the integrator to send on.
+BOOST_AUTO_TEST_CASE(remove_connection_drops_queued_ack_and_rst)
+{
+    {
+        // A CON with a token the client does not know gets a RST.
+        TestClient c;
+        nabto_coap_token unknown;
+        memset(&unknown, 0, sizeof(unknown));
+        unknown.tokenLength = 1;
+        unknown.token[0] = 0xAA;
+        c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_CONTENT, 0x7001, unknown).build());
+        BOOST_REQUIRE(nabto_coap_client_get_next_event(&c.client, c.now) == NABTO_COAP_CLIENT_NEXT_EVENT_SEND);
+
+        nabto_coap_client_remove_connection(&c.client, c.connection());
+        BOOST_TEST(nabto_coap_client_get_next_event(&c.client, c.now) != NABTO_COAP_CLIENT_NEXT_EVENT_SEND);
+    }
+    {
+        // A separate CON response gets an empty ACK.
+        TestClient c;
+        SentMessage req = c.sendRequest();
+        c.handlePacket(emptyPacket(NABTO_COAP_TYPE_ACK, req.messageId));
+        c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_CONTENT, 0x7002, req.token).build());
+        BOOST_REQUIRE(nabto_coap_client_get_next_event(&c.client, c.now) == NABTO_COAP_CLIENT_NEXT_EVENT_SEND);
+
+        nabto_coap_client_remove_connection(&c.client, c.connection());
+        BOOST_TEST(nabto_coap_client_get_next_event(&c.client, c.now) != NABTO_COAP_CLIENT_NEXT_EVENT_SEND);
+    }
+}
+
 BOOST_AUTO_TEST_SUITE_END()
