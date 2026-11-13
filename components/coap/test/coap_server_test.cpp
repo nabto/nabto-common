@@ -14,8 +14,19 @@ namespace {
 // that the server released everything it took.
 size_t liveAllocations = 0;
 
+// When not negative, the number of allocations to let through before
+// one fails. The failure resets it to -1.
+int allocationsBeforeFailure = -1;
+
 void* countingCalloc(size_t n, size_t size)
 {
+    if (allocationsBeforeFailure == 0) {
+        allocationsBeforeFailure = -1;
+        return NULL;
+    }
+    if (allocationsBeforeFailure > 0) {
+        allocationsBeforeFailure--;
+    }
     void* p = calloc(n, size);
     if (p != NULL) {
         liveAllocations++;
@@ -74,6 +85,15 @@ class RequestBuilder {
         ptr_ = nabto_coap_encode_option(NABTO_COAP_OPTION_URI_PATH - currentOption_, (const uint8_t*)path.data(), path.size(), ptr_, end());
         BOOST_REQUIRE(ptr_ != NULL);
         currentOption_ = NABTO_COAP_OPTION_URI_PATH;
+    }
+
+    // A further Uri-Path segment after the one given to the constructor.
+    RequestBuilder& uriPath(const std::string& segment)
+    {
+        ptr_ = nabto_coap_encode_option(NABTO_COAP_OPTION_URI_PATH - currentOption_, (const uint8_t*)segment.data(), segment.size(), ptr_, end());
+        BOOST_REQUIRE(ptr_ != NULL);
+        currentOption_ = NABTO_COAP_OPTION_URI_PATH;
+        return *this;
     }
 
     // Uri-Query is critical and not understood by the server.
@@ -2000,6 +2020,29 @@ BOOST_AUTO_TEST_CASE(malformed_parameter_segment_is_rejected)
 
     nabto_coap_server_destroy(&server);
     BOOST_TEST(liveAllocations == allocationsBefore);
+}
+
+// The request is allocated before its path parameters. When storing a
+// parameter fails the request has not been put in the requests list yet,
+// and releasing it must not unlink it from one.
+BOOST_AUTO_TEST_CASE(out_of_memory_for_path_parameter_gets_service_unavailable)
+{
+    TestServer s;
+    const char* path[] = { "test", "{id}", NULL };
+    struct nabto_coap_server_resource* resource;
+    BOOST_REQUIRE(nabto_coap_server_add_resource(&s.server, NABTO_COAP_CODE_GET, path, &unusedHandler, NULL, &resource) == NABTO_COAP_ERROR_OK);
+
+    // The request itself is allocated, the parameter is not.
+    allocationsBeforeFailure = 1;
+    s.handlePacket(RequestBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_GET, 0x1501, "t1").uriPath("42").build());
+    allocationsBeforeFailure = -1;
+
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_SERVICE_UNAVAILABLE);
+    BOOST_TEST(sent[0].messageId == 0x1501);
+    BOOST_TEST(s.requests.activeRequests == 0u);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
