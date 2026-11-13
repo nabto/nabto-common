@@ -728,6 +728,46 @@ BOOST_AUTO_TEST_CASE(syn_ack_ack_extension_is_applied_only_when_packet_is_valid)
     }
 }
 
+BOOST_AUTO_TEST_CASE(syn_ack_to_a_responder_is_ignored)
+{
+    // A responder waiting for the nonce response to its syn|ack must not
+    // let a syn|ack from the peer turn replay protection off, replace its
+    // nonce, or complete the handshake with the ack extension it carries.
+    std::vector<uint8_t> otherNonce(NABTO_STREAM_NONCE_SIZE, 0x55);
+    for (int withNonce = 0; withNonce <= 1; withNonce++) {
+        StreamFixture f;
+        f.responder();
+        handle(&f.stream, PacketBuilder(NABTO_STREAM_FLAG_SYN, 42)
+            .ext(NABTO_STREAM_EXTENSION_SYN, 100u)
+            .ext(NABTO_STREAM_EXTENSION_NONCE_CAPABILITY, std::vector<uint8_t>())
+            .build());
+        BOOST_REQUIRE(nabto_stream_accept(&f.stream) == NABTO_STREAM_STATUS_OK);
+        BOOST_REQUIRE(f.stream.state == ST_SYN_RCVD);
+
+        PacketBuilder synAck(NABTO_STREAM_FLAG_SYN | NABTO_STREAM_FLAG_ACK, 43);
+        synAck.ext(NABTO_STREAM_EXTENSION_ACK, ackPayload(0, 1000, 0))
+            .ext(NABTO_STREAM_EXTENSION_SEGMENT_SIZES, segmentSizes(200, 200))
+            .ext(NABTO_STREAM_EXTENSION_SYN, 100u);
+        if (withNonce) {
+            synAck.ext(NABTO_STREAM_EXTENSION_NONCE, otherNonce);
+        }
+        handle(&f.stream, synAck.build());
+
+        BOOST_TEST(f.stream.state == ST_SYN_RCVD, "withNonce " << withNonce);
+        BOOST_TEST(!f.stream.disableReplayProtection, "withNonce " << withNonce);
+        BOOST_TEST(!f.stream.sendNonce, "withNonce " << withNonce);
+        BOOST_TEST(memcmp(f.stream.nonce, NONCE, NABTO_STREAM_NONCE_SIZE) == 0, "withNonce " << withNonce);
+
+        // An ack without the nonce response is still not accepted.
+        handle(&f.stream, PacketBuilder(NABTO_STREAM_FLAG_ACK, 44)
+            .ext(NABTO_STREAM_EXTENSION_ACK, ackPayload(0, 1000, 0))
+            .ext(NABTO_STREAM_EXTENSION_DATA, dataPayload(101, 4))
+            .build());
+        BOOST_TEST(f.stream.state == ST_SYN_RCVD, "withNonce " << withNonce);
+        BOOST_TEST(f.stream.recvTop == 100u, "withNonce " << withNonce);
+    }
+}
+
 // L7: parse_ack_extension
 
 BOOST_AUTO_TEST_CASE(ack_extension_with_bad_length_is_ignored)
