@@ -232,6 +232,15 @@ void nabto_stream_parse_syn(struct nabto_stream* stream, const uint8_t* ptr, con
 
 void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr, const uint8_t* end, struct nabto_stream_header* hdr)
 {
+    if (stream->isResponder) {
+        // A syn|ack answers a syn and a responder never sends one. Acting
+        // on it would let the peer turn replay protection off, replace
+        // our nonce, and have its ack extension complete the handshake
+        // without the nonce response.
+        NN_LOG_ERROR(stream->module->logger, NABTO_STREAM_LOG_MODULE, "syn|ack received by a responder, dropping packet");
+        return;
+    }
+
     struct nabto_stream_syn_ack_request req;
     memset(&req, 0, sizeof(req));
     req.maxSendSegmentSize = NABTO_STREAM_DEFAULT_MAX_SEND_SEGMENT_SIZE;
