@@ -18,6 +18,13 @@ closed while a recv segment cannot be allocated. Data outside the
 window is dropped and acked. The segment allocator in the module
 remains the overall memory bound.
 
+## Fin
+
+A peer only sends a fin once all the data it has sent has been acked,
+as required by the protocol documentation. A fin therefore never
+arrives ahead of missing data, and the receiver changes state as soon
+as the fin is received.
+
 ## Security model
 
 Stream packets are carried inside a DTLS connection, so they cannot be
