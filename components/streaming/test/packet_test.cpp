@@ -1447,6 +1447,38 @@ BOOST_AUTO_TEST_CASE(syn_ack_window_is_applied_when_the_peer_stamps_start_in_the
     BOOST_TEST(f.unacked() == seqs(3, 4));
 }
 
+BOOST_AUTO_TEST_CASE(duplicate_nacks_retransmit_when_our_stamps_wrap)
+{
+    // Segments 1..4 go out in one packet. Two acks then ack 2..4 and nack
+    // 1, echoing a stamp sent after that packet; the second nack marks 1
+    // for retransmission. With our stamps starting at 4294967294 the echo
+    // has wrapped past 0, which must not hide that it is the newer stamp.
+    for (uint32_t base : { 100u, 4294967294u }) {
+        SenderFixture f(4);
+        f.stream.logicalTimestamp = base;
+        f.write(4);
+        f.send();
+        BOOST_REQUIRE(f.unacked() == seqs(1, 4));
+
+        uint32_t tsEcr = base + 3;
+        for (int i = 0; i < 2; i++) {
+            // maxAcked 4, acked gap 3 (4..2), nacked gap 1 (1).
+            std::vector<uint8_t> ack = PacketBuilder::be32(4);
+            for (uint32_t v : { 4u, tsEcr, 0u, 3u, 1u }) {
+                std::vector<uint8_t> b = PacketBuilder::be32(v);
+                ack.insert(ack.end(), b.begin(), b.end());
+            }
+            handle(&f.stream, PacketBuilder(NABTO_STREAM_FLAG_ACK, ++f.peerStamp)
+                   .ext(NABTO_STREAM_EXTENSION_ACK, ack)
+                   .build());
+        }
+
+        BOOST_TEST(f.unacked() == seqs(1, 1), "base " << base);
+        BOOST_TEST(f.stream.unacked->nextUnacked->ackedAfter == 2u, "base " << base);
+        BOOST_TEST(f.stream.resendList->nextResend == f.stream.unacked->nextUnacked, "base " << base);
+    }
+}
+
 BOOST_AUTO_TEST_CASE(window_reduction_keeps_flight_size_in_step_with_unacked)
 {
     // A genuine reduction moves 3 and 4 from unacked back to the send list;

@@ -554,7 +554,8 @@ struct nabto_stream_send_segment* nabto_stream_handle_ack_iterator(struct nabto_
 
 struct nabto_stream_send_segment* nabto_stream_handle_nack_iterator(struct nabto_stream* stream, struct nabto_stream_send_segment* iterator, uint32_t timestampEcho)
 {
-    if (iterator->logicalSentStamp < timestampEcho) {
+    // logical stamps wrap, compare them as nabto_stream_update_congestion_control_receive_stats does.
+    if (nabto_stream_logical_stamp_less(iterator->logicalSentStamp, timestampEcho)) {
         iterator->ackedAfter++;
         if (iterator->ackedAfter == 2) {
             nabto_stream_congestion_control_adjust_ssthresh_after_triple_ack(stream, iterator);
