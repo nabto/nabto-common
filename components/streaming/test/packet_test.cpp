@@ -1572,4 +1572,44 @@ BOOST_AUTO_TEST_CASE(both_ends_agree_on_segment_sizes_after_handshake)
     BOOST_TEST(initiator.stream.maxRecvSegmentSize == 300);
 }
 
+BOOST_AUTO_TEST_CASE(connection_died_reports_a_clean_close_only_when_nothing_is_outstanding)
+{
+    {
+        // The peer's fin is received and our fin is acked.
+        StreamFixture f;
+        f.stream.state = ST_TIME_WAIT;
+        nabto_stream_connection_died(&f.stream);
+        BOOST_TEST(f.stream.state == ST_CLOSED);
+    }
+    {
+        // close in CLOSE_WAIT with data in flight, the fin waits for it.
+        SenderFixture f(4);
+        f.write(2);
+        f.send();
+        f.stream.state = ST_CLOSE_WAIT;
+        BOOST_REQUIRE(nabto_stream_close(&f.stream) == NABTO_STREAM_STATUS_OK);
+        BOOST_REQUIRE(f.stream.state == ST_LAST_ACK);
+        nabto_stream_connection_died(&f.stream);
+        BOOST_TEST(f.stream.state == ST_ABORTED_RST);
+    }
+    {
+        // The data is acked and only our fin is outstanding.
+        SenderFixture f(4);
+        f.write(2);
+        f.send();
+        f.stream.state = ST_CLOSE_WAIT;
+        BOOST_REQUIRE(nabto_stream_close(&f.stream) == NABTO_STREAM_STATUS_OK);
+        f.ack(2, 4);
+        f.send();
+        BOOST_REQUIRE(f.unacked() == seqs(3, 3));
+        nabto_stream_connection_died(&f.stream);
+        BOOST_TEST(f.stream.state == ST_CLOSED);
+    }
+    {
+        SenderFixture f(4);
+        nabto_stream_connection_died(&f.stream);
+        BOOST_TEST(f.stream.state == ST_ABORTED_RST);
+    }
+}
+
 BOOST_AUTO_TEST_SUITE_END()
