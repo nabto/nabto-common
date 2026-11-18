@@ -789,6 +789,8 @@ void nabto_stream_handle_fin(struct nabto_stream* stream, uint32_t seq)
 {
     nabto_stream_state state = stream->state;
 
+    // The protocol only allows a fin once all data before it has been
+    // acked, so there is no missing data to wait for before changing state.
     if (state == ST_ESTABLISHED ||
         state == ST_FIN_WAIT_1 ||
         state == ST_FIN_WAIT_2)
