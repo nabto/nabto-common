@@ -21,8 +21,13 @@ remains the overall memory bound.
 ## Security model
 
 Stream packets are carried inside a DTLS connection, so they cannot be
-forged or modified. The remaining threat is an old packet being
-replayed within the DTLS replay protection window.
+forged or modified. DTLS rejects a record it has already received, but
+not one it has never seen: an adversary can drop a record from the
+network and deliver it later, and DTLS accepts it once as long as it
+is still inside the replay protection window. Since the stream layer
+retransmits lost packets in new DTLS records, the withheld record
+arrives as a replay of a stream packet which has already been handled,
+possibly after the stream it belonged to has been closed.
 
 The initiator never reuses a stream id, so a replayed packet from an
 old stream cannot reach a new stream on the initiator, and a replayed
