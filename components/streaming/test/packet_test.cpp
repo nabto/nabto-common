@@ -1572,4 +1572,29 @@ BOOST_AUTO_TEST_CASE(both_ends_agree_on_segment_sizes_after_handshake)
     BOOST_TEST(initiator.stream.maxRecvSegmentSize == 300);
 }
 
+BOOST_AUTO_TEST_CASE(syn_and_syn_ack_retransmissions_back_off_alike)
+{
+    // nabto_stream_event_handled counts each sent syn or syn|ack and arms
+    // the backed off timeout from that count. Building the packet must not
+    // count it again.
+    StreamFixture initiator;
+    initiator.initiator();
+    nabto_stream_open(&initiator.stream, 0);
+    StreamFixture responder;
+    responder.responder();
+    handle(&responder.stream, createSyn(&initiator.stream));
+    nabto_stream_accept(&responder.stream);
+    BOOST_REQUIRE(responder.stream.state == ST_SYN_RCVD);
+    BOOST_REQUIRE(initiator.stream.retransCount == 0u);
+
+    for (uint16_t n = 1; n <= 3; n++) {
+        createSyn(&initiator.stream);
+        nabto_stream_event_handled(&initiator.stream, ET_SYN);
+        createSynAck(&responder.stream);
+        nabto_stream_event_handled(&responder.stream, ET_SYN_ACK);
+        BOOST_TEST(initiator.stream.retransCount == n);
+        BOOST_TEST(responder.stream.retransCount == n);
+    }
+}
+
 BOOST_AUTO_TEST_SUITE_END()
