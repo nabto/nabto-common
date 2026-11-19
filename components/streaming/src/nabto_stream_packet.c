@@ -602,9 +602,6 @@ size_t nabto_stream_create_syn_packet(struct nabto_stream* stream, uint8_t* buff
         return 0;
     }
 
-    stream->timeoutStamp = nabto_stream_get_future_stamp(stream, NABTO_STREAM_DEFAULT_TIMEOUT);
-    stream->retransCount++;
-
     ptrdiff_t s = ptr - buffer;
     return (size_t)s;
 }

@@ -789,6 +789,8 @@ void nabto_stream_handle_fin(struct nabto_stream* stream, uint32_t seq)
 {
     nabto_stream_state state = stream->state;
 
+    // The protocol only allows a fin once all data before it has been
+    // acked, so there is no missing data to wait for before changing state.
     if (state == ST_ESTABLISHED ||
         state == ST_FIN_WAIT_1 ||
         state == ST_FIN_WAIT_2)
@@ -974,9 +976,8 @@ void nabto_stream_dispatch_event(struct nabto_stream* stream)
 
 void nabto_stream_connection_died(struct nabto_stream* stream)
 {
-    if (stream->state == ST_LAST_ACK) {
-        SET_STATE(stream, ST_CLOSED);
-    } else if (stream->state < ST_CLOSED) {
-        SET_STATE(stream, ST_ABORTED_RST);
-    }
+    // Nothing more can be sent or received, which is what an rst from the
+    // peer means too: the stream closed cleanly if all our data was acked
+    // and the peer's fin was received, otherwise data may have been lost.
+    nabto_stream_handle_rst(stream);
 }
