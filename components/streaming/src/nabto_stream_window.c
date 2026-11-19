@@ -972,9 +972,8 @@ void nabto_stream_dispatch_event(struct nabto_stream* stream)
 
 void nabto_stream_connection_died(struct nabto_stream* stream)
 {
-    if (stream->state == ST_LAST_ACK) {
-        SET_STATE(stream, ST_CLOSED);
-    } else if (stream->state < ST_CLOSED) {
-        SET_STATE(stream, ST_ABORTED_RST);
-    }
+    // Nothing more can be sent or received, which is what an rst from the
+    // peer means too: the stream closed cleanly if all our data was acked
+    // and the peer's fin was received, otherwise data may have been lost.
+    nabto_stream_handle_rst(stream);
 }
