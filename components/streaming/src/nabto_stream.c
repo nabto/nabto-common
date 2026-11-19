@@ -90,7 +90,12 @@ nabto_stream_status nabto_stream_write_buffer(struct nabto_stream* stream, const
     // queues no more than writing one segment at a time would.
     while (bufferSize && nabto_stream_can_write(stream) > 0)
     {
+        // can_write returns 0 without a next unfilled segment, so it is set
+        // here. The check guards against can_write changing.
         struct nabto_stream_send_segment* segment = stream->nextUnfilledSendSegment;
+        if (!segment) {
+            break;
+        }
         stream->nextUnfilledSendSegment = NULL;
         nabto_stream_allocate_next_send_segment(stream);
         stream->xmitMaxAllocated++;
