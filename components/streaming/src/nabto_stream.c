@@ -85,41 +85,43 @@ nabto_stream_status nabto_stream_write_buffer(struct nabto_stream* stream, const
         return NABTO_STREAM_STATUS_CLOSED;
     }
 
-    if (nabto_stream_can_write(stream) > 0) {
     // TODO add into last unsent segment if there's room for it.
-        while (bufferSize)
-        {
-            struct nabto_stream_send_segment* segment = stream->nextUnfilledSendSegment;
-            if (!segment) {
-                break;
-            }
-            stream->nextUnfilledSendSegment = NULL;
-            nabto_stream_allocate_next_send_segment(stream);
-            stream->xmitMaxAllocated++;
-            segment->seq = stream->xmitMaxAllocated;
-
-            uint16_t sz;
-            sz = (uint16_t)NABTO_STREAM_MIN(bufferSize, stream->maxSendSegmentSize);
-            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "-------- nabto_stream_write %i bytes, seq=%" NN_LOG_PRIu32, sz, segment->seq);
-
-            memcpy(segment->buf, (const void*) buffer, sz);
-            segment->used = sz;
-            segment->state = B_DATA;
-
-            queued += sz;
-            bufferSize -= sz;
-            buffer += sz;
-
-            if (stream->timeoutStamp.type == NABTO_STREAM_STAMP_INFINITE)
-            {
-                // Restart the data timeout timer.
-                NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "restart retransmission timer %" NN_LOG_PRIu16, stream->cCtrl.rto);
-                stream->timeoutStamp = nabto_stream_get_future_stamp(stream, stream->cCtrl.rto);
-            }
-
-            // add segment to end of send queue
-            nabto_stream_add_segment_to_send_list_before_elm(stream, stream->sendList, segment);
+    // can_write is checked for every segment, so a single large write
+    // queues no more than writing one segment at a time would.
+    while (bufferSize && nabto_stream_can_write(stream) > 0)
+    {
+        // can_write returns 0 without a next unfilled segment, so it is set
+        // here. The check guards against can_write changing.
+        struct nabto_stream_send_segment* segment = stream->nextUnfilledSendSegment;
+        if (!segment) {
+            break;
         }
+        stream->nextUnfilledSendSegment = NULL;
+        nabto_stream_allocate_next_send_segment(stream);
+        stream->xmitMaxAllocated++;
+        segment->seq = stream->xmitMaxAllocated;
+
+        uint16_t sz;
+        sz = (uint16_t)NABTO_STREAM_MIN(bufferSize, stream->maxSendSegmentSize);
+        NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "-------- nabto_stream_write %i bytes, seq=%" NN_LOG_PRIu32, sz, segment->seq);
+
+        memcpy(segment->buf, (const void*) buffer, sz);
+        segment->used = sz;
+        segment->state = B_DATA;
+
+        queued += sz;
+        bufferSize -= sz;
+        buffer += sz;
+
+        if (stream->timeoutStamp.type == NABTO_STREAM_STAMP_INFINITE)
+        {
+            // Restart the data timeout timer.
+            NN_LOG_TRACE(stream->module->logger, NABTO_STREAM_LOG_MODULE, "restart retransmission timer %" NN_LOG_PRIu16, stream->cCtrl.rto);
+            stream->timeoutStamp = nabto_stream_get_future_stamp(stream, stream->cCtrl.rto);
+        }
+
+        // add segment to end of send queue
+        nabto_stream_add_segment_to_send_list_before_elm(stream, stream->sendList, segment);
     }
 
     if (queued) {
