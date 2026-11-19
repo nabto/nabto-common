@@ -1333,6 +1333,80 @@ BOOST_AUTO_TEST_CASE(receiver_which_stops_reading_recovers_through_the_probe)
     BOOST_TEST(receiver.stream.recvTop == recvTop + 1);
 }
 
+BOOST_AUTO_TEST_CASE(large_write_queues_what_segment_sized_writes_would)
+{
+    // can_write limits the send list by the congestion window and the
+    // advertised window. A single large write used to check it only once
+    // and then queue segments until the allocator ran out.
+    const uint32_t windows[] = { 4, 100000 };
+    for (size_t i = 0; i < sizeof(windows)/sizeof(windows[0]); i++) {
+        std::vector<uint8_t> data(100000, 0xab);
+
+        SenderFixture small(windows[i]);
+        size_t smallTotal = 0;
+        for (;;) {
+            size_t written = 0;
+            BOOST_REQUIRE(nabto_stream_write_buffer(&small.stream, data.data(), small.stream.maxSendSegmentSize, &written) == NABTO_STREAM_STATUS_OK);
+            if (written == 0) {
+                break;
+            }
+            smallTotal += written;
+        }
+
+        SenderFixture large(windows[i]);
+        size_t written = 0;
+        BOOST_REQUIRE(nabto_stream_write_buffer(&large.stream, data.data(), data.size(), &written) == NABTO_STREAM_STATUS_OK);
+
+        BOOST_TEST(written == smallTotal, "window " << windows[i]);
+        BOOST_TEST(large.sendList() == small.sendList(), "window " << windows[i]);
+        BOOST_TEST(large.stream.sendListSize <= NABTO_STREAM_MAX_SEND_LIST_SIZE + 1, "window " << windows[i]);
+        BOOST_TEST(nabto_stream_can_write(&large.stream) == 0u, "window " << windows[i]);
+    }
+    // the advertised window allows segments 1..4 and the one after it.
+    SenderFixture f(4);
+    std::vector<uint8_t> data(100000, 0xab);
+    size_t written = 0;
+    BOOST_REQUIRE(nabto_stream_write_buffer(&f.stream, data.data(), data.size(), &written) == NABTO_STREAM_STATUS_OK);
+    BOOST_TEST(f.sendList() == seqs(1, 5));
+}
+
+BOOST_AUTO_TEST_CASE(large_write_is_delivered_through_repeated_writes)
+{
+    // A writer which hands the whole remaining buffer to every write still
+    // gets everything across once writes are limited by can_write.
+    StreamFixture sender;
+    StreamFixture receiver;
+    sender.initiator();
+    receiver.responder();
+    sender.stream.disableReplayProtection = true;
+    nabto_stream_set_application_event_callback(&sender.stream, &noApplicationEvents, NULL);
+    nabto_stream_set_application_event_callback(&receiver.stream, &noApplicationEvents, NULL);
+    nabto_stream_open(&sender.stream, 0);
+    converge(&sender.stream, &receiver.stream);
+    BOOST_REQUIRE(sender.stream.state == ST_ESTABLISHED);
+    BOOST_REQUIRE(receiver.stream.state == ST_ESTABLISHED);
+
+    std::vector<uint8_t> data(100000);
+    for (size_t i = 0; i < data.size(); i++) {
+        data[i] = (uint8_t)(i * 7);
+    }
+    size_t offset = 0;
+    for (size_t i = 0; i < 100000 && offset < data.size(); i++) {
+        size_t written = 0;
+        BOOST_REQUIRE(nabto_stream_write_buffer(&sender.stream, data.data() + offset, data.size() - offset, &written) == NABTO_STREAM_STATUS_OK);
+        BOOST_REQUIRE(sender.stream.sendListSize <= NABTO_STREAM_MAX_SEND_LIST_SIZE + 1);
+        offset += written;
+        converge(&sender.stream, &receiver.stream);
+    }
+    BOOST_REQUIRE(offset == data.size());
+
+    std::vector<uint8_t> received(data.size());
+    size_t read = 0;
+    BOOST_REQUIRE(nabto_stream_read_buffer(&receiver.stream, received.data(), received.size(), &read) == NABTO_STREAM_STATUS_OK);
+    BOOST_TEST(read == data.size());
+    BOOST_TEST(received == data);
+}
+
 BOOST_AUTO_TEST_CASE(two_segments_in_one_packet_are_both_accepted)
 {
     // After the first segment fills the pre-allocated idle segment there is
