@@ -1637,4 +1637,54 @@ BOOST_AUTO_TEST_CASE(syn_and_syn_ack_retransmissions_back_off_alike)
     }
 }
 
+namespace {
+
+void recordEvent(nabto_stream_application_event_type eventType, void* data)
+{
+    ((std::vector<nabto_stream_application_event_type>*)data)->push_back(eventType);
+}
+
+std::vector<nabto_stream_application_event_type> dispatchAll(struct nabto_stream* stream)
+{
+    std::vector<nabto_stream_application_event_type> events;
+    nabto_stream_set_application_event_callback(stream, &recordEvent, &events);
+    while (nabto_stream_next_event_to_handle(stream) == ET_APPLICATION_EVENT ||
+           nabto_stream_next_event_to_handle(stream) == ET_ACK)
+    {
+        if (nabto_stream_next_event_to_handle(stream) == ET_ACK) {
+            nabto_stream_event_handled(stream, ET_ACK);
+        } else {
+            nabto_stream_dispatch_event(stream);
+        }
+    }
+    nabto_stream_set_application_event_callback(stream, NULL, NULL);
+    return events;
+}
+
+bool hasEvent(const std::vector<nabto_stream_application_event_type>& events, nabto_stream_application_event_type e)
+{
+    return std::find(events.begin(), events.end(), e) != events.end();
+}
+
+} // namespace
+
+BOOST_AUTO_TEST_CASE(read_closed_is_signalled_when_the_fin_is_delivered_in_order)
+{
+    // The fin overtakes the data before it: read closed waits for the data.
+    CountingFixture f;
+    handle(&f.stream, finPacket(2));
+    BOOST_TEST(!hasEvent(dispatchAll(&f.stream), NABTO_STREAM_APPLICATION_EVENT_TYPE_READ_CLOSED));
+
+    handle(&f.stream, dataPacket(1, 10));
+    std::vector<nabto_stream_application_event_type> events = dispatchAll(&f.stream);
+    BOOST_TEST(hasEvent(events, NABTO_STREAM_APPLICATION_EVENT_TYPE_DATA_READY));
+    BOOST_TEST(hasEvent(events, NABTO_STREAM_APPLICATION_EVENT_TYPE_READ_CLOSED));
+
+    uint8_t buf[10];
+    size_t readen = 0;
+    BOOST_TEST(nabto_stream_read_buffer(&f.stream, buf, sizeof(buf), &readen) == NABTO_STREAM_STATUS_OK);
+    BOOST_TEST(readen == 10u);
+    BOOST_TEST(nabto_stream_read_buffer(&f.stream, buf, sizeof(buf), &readen) == NABTO_STREAM_STATUS_EOF);
+}
+
 BOOST_AUTO_TEST_SUITE_END()

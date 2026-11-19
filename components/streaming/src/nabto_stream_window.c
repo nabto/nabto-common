@@ -878,6 +878,10 @@ void nabto_stream_move_segments_from_recv_window_to_recv_read(struct nabto_strea
         nabto_stream_add_segment_to_recv_list_before_elm(stream->recvRead, iterator);
         stream->recvReadSize++;
         stream->recvTop = iterator->seq;
+        if (iterator->isFin) {
+            // everything the peer sent is in recvRead, it will send no more.
+            stream->applicationEvents.readClosed = true;
+        }
         iterator = next;
         stream->applicationEvents.dataReady = true;
     }

@@ -271,8 +271,9 @@ typedef enum {
      */
     NABTO_STREAM_APPLICATION_EVENT_TYPE_DATA_WRITE,
     /**
-     * No more data can be read from the stream since the stream has
-     * been closed by the other end.
+     * The other end has closed its direction of the stream and will
+     * send no more data. Data received before the close may still be
+     * waiting, read until NABTO_STREAM_STATUS_EOF.
      */
     NABTO_STREAM_APPLICATION_EVENT_TYPE_READ_CLOSED,
     /**
