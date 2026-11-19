@@ -723,16 +723,21 @@ void nabto_stream_handle_syn(struct nabto_stream* stream, struct nabto_stream_he
 
 void nabto_stream_handle_syn_ack(struct nabto_stream* stream, struct nabto_stream_header* hdr, struct nabto_stream_syn_ack_request* req)
 {
-    if (!stream->disableReplayProtection) {
+    // The nonce is taken from the syn|ack answering our syn. parse_syn_ack
+    // drops a later syn|ack unless it carries the same nonce, so that one is
+    // a retransmission asking for the nonce response again.
+    if (stream->state == ST_SYN_SENT && !stream->disableReplayProtection) {
         if (!req->hasNonce) {
             // this is only relevant for testing purposes such that it can be
             // testet that both ends agreed on whether replay protection was
             // used or not.
             stream->disableReplayProtection = true;
         } else {
-            stream->sendNonce = true;
             memcpy(stream->nonce, req->nonce, NABTO_STREAM_NONCE_SIZE);
         }
+    }
+    if (!stream->disableReplayProtection) {
+        stream->sendNonce = true;
     }
     // syn ack is only possible if we have sent a syn first
     if (stream->state == ST_SYN_SENT) {

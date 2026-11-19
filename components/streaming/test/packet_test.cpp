@@ -769,6 +769,55 @@ BOOST_AUTO_TEST_CASE(syn_ack_to_a_responder_is_ignored)
     }
 }
 
+BOOST_AUTO_TEST_CASE(syn_ack_with_another_nonce_after_the_handshake_is_ignored)
+{
+    // A replayed syn can open a new responder stream with the id of a stream
+    // the initiator still has, and that stream sends a syn|ack with a fresh
+    // nonce. The initiator must not answer it with a nonce response, or act
+    // on its ack extension. A retransmission of the syn|ack it accepted is
+    // still answered.
+    const nabto_stream_state states[] = { ST_ESTABLISHED, ST_FIN_WAIT_1, ST_CLOSE_WAIT, ST_LAST_ACK };
+    std::vector<uint8_t> otherNonce(NABTO_STREAM_NONCE_SIZE, 0x55);
+    std::vector<uint8_t> nonce(NONCE, NONCE + NABTO_STREAM_NONCE_SIZE);
+    for (size_t i = 0; i < sizeof(states)/sizeof(states[0]); i++) {
+        for (int variant = 0; variant < 3; variant++) {
+            StreamFixture f;
+            f.initiator();
+            nabto_stream_open(&f.stream, 0);
+            handle(&f.stream, synAckPacket(100, 200, 200));
+            BOOST_REQUIRE(f.stream.state == ST_ESTABLISHED);
+            f.stream.state = states[i];
+            f.stream.sendNonce = false;
+            f.stream.imediateAck = false;
+            uint32_t window = f.stream.maxAdvertisedWindow;
+
+            PacketBuilder synAck(NABTO_STREAM_FLAG_SYN | NABTO_STREAM_FLAG_ACK, 43);
+            synAck.ext(NABTO_STREAM_EXTENSION_ACK, ackPayload(0, 1000, 0))
+                .ext(NABTO_STREAM_EXTENSION_SEGMENT_SIZES, segmentSizes(200, 200))
+                .ext(NABTO_STREAM_EXTENSION_SYN, 100u);
+            if (variant == 0) {
+                synAck.ext(NABTO_STREAM_EXTENSION_NONCE, otherNonce);
+            } else if (variant == 2) {
+                synAck.ext(NABTO_STREAM_EXTENSION_NONCE, nonce);
+            }
+            // variant 1 has no nonce, which must not turn replay protection off.
+            handle(&f.stream, synAck.build());
+
+            BOOST_TEST(f.stream.state == states[i], "state " << states[i] << " variant " << variant);
+            BOOST_TEST(!f.stream.disableReplayProtection, "state " << states[i] << " variant " << variant);
+            BOOST_TEST(memcmp(f.stream.nonce, NONCE, NABTO_STREAM_NONCE_SIZE) == 0, "state " << states[i] << " variant " << variant);
+            if (variant == 2) {
+                BOOST_TEST(f.stream.sendNonce, "state " << states[i]);
+                BOOST_TEST(f.stream.maxAdvertisedWindow == 1000u, "state " << states[i]);
+            } else {
+                BOOST_TEST(!f.stream.sendNonce, "state " << states[i] << " variant " << variant);
+                BOOST_TEST(!f.stream.imediateAck, "state " << states[i] << " variant " << variant);
+                BOOST_TEST(f.stream.maxAdvertisedWindow == window, "state " << states[i] << " variant " << variant);
+            }
+        }
+    }
+}
+
 // L7: parse_ack_extension
 
 BOOST_AUTO_TEST_CASE(ack_extension_with_bad_length_is_ignored)

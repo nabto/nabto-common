@@ -50,6 +50,14 @@ older initiators, disables replay protection for that stream. A
 responder ignores syn|ack packets, so the peer cannot replace the nonce
 or turn replay protection off once the stream exists.
 
+The initiator takes the nonce from the syn|ack answering its syn only.
+A replayed syn can reach the responder after it has released its
+stream while the initiator still has its end, e.g. in `ST_LAST_ACK`
+retransmitting its fin. The new responder stream sends a syn|ack with a
+fresh nonce under the same stream id; the initiator drops it, since a
+nonce response would establish that stream. A later syn|ack with the
+nonce already accepted is a retransmission and is answered.
+
 The nonce must be fresh and random for each stream; generating it is
 the responsibility of the caller of `nabto_stream_init_responder`.
 
