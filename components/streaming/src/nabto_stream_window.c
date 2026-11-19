@@ -728,9 +728,19 @@ void nabto_stream_handle_syn_ack(struct nabto_stream* stream, struct nabto_strea
     // a retransmission asking for the nonce response again.
     if (stream->state == ST_SYN_SENT && !stream->disableReplayProtection) {
         if (!req->hasNonce) {
-            // this is only relevant for testing purposes such that it can be
-            // testet that both ends agreed on whether replay protection was
-            // used or not.
+            // The responder sent no nonce: it does not support replay
+            // protection, or has it turned off. The initiator never
+            // validates a nonce, so all this changes for it is that it
+            // has no nonce response to send. Recording it here lets
+            // tests check that both ends agreed on whether replay
+            // protection is used, and tells
+            // nabto_stream_syn_ack_is_retransmission that a retransmitted
+            // syn|ack carries no nonce either.
+            //
+            // This is not a downgrade an attacker can trigger: packets
+            // cannot be forged inside DTLS, and a replayed syn|ack only
+            // gets here in ST_SYN_SENT, before any syn|ack of this
+            // stream exists to replay.
             stream->disableReplayProtection = true;
         } else {
             memcpy(stream->nonce, req->nonce, NABTO_STREAM_NONCE_SIZE);
