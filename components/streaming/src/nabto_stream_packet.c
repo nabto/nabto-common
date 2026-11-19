@@ -230,6 +230,18 @@ void nabto_stream_parse_syn(struct nabto_stream* stream, const uint8_t* ptr, con
     nabto_stream_handle_syn(stream, hdr, &req);
 }
 
+/**
+ * A syn|ack received after the one which answered our syn is a
+ * retransmission if it says the same about the nonce.
+ */
+static bool nabto_stream_syn_ack_is_retransmission(struct nabto_stream* stream, struct nabto_stream_syn_ack_request* req)
+{
+    if (stream->disableReplayProtection) {
+        return !req->hasNonce;
+    }
+    return req->hasNonce && memcmp(req->nonce, stream->nonce, NABTO_STREAM_NONCE_SIZE) == 0;
+}
+
 void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr, const uint8_t* end, struct nabto_stream_header* hdr)
 {
     if (stream->isResponder) {
@@ -292,6 +304,15 @@ void nabto_stream_parse_syn_ack(struct nabto_stream* stream, const uint8_t* ptr,
 
     if (!hasSegmentSizes || !hasSeq || badNonce) {
         NN_LOG_ERROR(stream->module->logger, NABTO_STREAM_LOG_MODULE, "invalid syn|ack packet");
+        return;
+    }
+
+    if (stream->state != ST_SYN_SENT && !nabto_stream_syn_ack_is_retransmission(stream, &req)) {
+        // Only the syn|ack answering our syn sets the nonce. A later one
+        // with another nonce comes from a new responder stream with this
+        // id, opened by a replayed syn; answering it with a nonce response
+        // would establish that stream.
+        NN_LOG_ERROR(stream->module->logger, NABTO_STREAM_LOG_MODULE, "syn|ack does not match the handshake, dropping packet");
         return;
     }
 
