@@ -1024,6 +1024,17 @@ void nabto_coap_server_observer_free(struct nabto_coap_server_observer* observer
     server->allocator.free(observer);
 }
 
+/**
+ * RFC 7641 section 4.4: the Observe value of a notification is a 24 bit
+ * sequence number, which wraps. Above 2^24 - 1 it would need a fourth
+ * byte, and section 2 limits the option to three, so a receiver rejects
+ * the whole notification.
+ */
+static uint32_t nabto_coap_server_observe_next_sequence(uint32_t sequenceNumber)
+{
+    return (sequenceNumber + 1) & 0xFFFFFFu;
+}
+
 void nabto_coap_server_observer_promote_pending(struct nabto_coap_server_requests* requests, struct nabto_coap_server_observer* observer)
 {
     if (!observer->pendingValid) {
@@ -1040,7 +1051,7 @@ void nabto_coap_server_observer_promote_pending(struct nabto_coap_server_request
     observer->payload = observer->pendingPayload;
     observer->payloadLength = observer->pendingPayloadLength;
 
-    observer->sequenceNumber++;
+    observer->sequenceNumber = nabto_coap_server_observe_next_sequence(observer->sequenceNumber);
     observer->messageId = nabto_coap_server_next_message_id(requests);
     observer->retransmissions = 0;
     observer->sendNow = true;
@@ -1165,7 +1176,7 @@ nabto_coap_error nabto_coap_server_resource_notify(
                     obs->payload = NULL;
                     obs->payloadLength = 0;
                 }
-                obs->sequenceNumber++;
+                obs->sequenceNumber = nabto_coap_server_observe_next_sequence(obs->sequenceNumber);
                 obs->code = code;
                 obs->hasContentFormat = true;
                 obs->contentFormat = contentFormat;
