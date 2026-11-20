@@ -152,15 +152,20 @@ until the application sets them.
   retransmission; an update arriving while one is in flight is kept
   in a single pending slot and sent when the in-flight one is ACKed.
   An observer is removed on a RST, when retransmissions are exhausted,
-  on deregistration and when its connection is removed. Observers
+  on deregistration and when its connection is removed. The
+  application ends one with `nabto_coap_server_remove_observer` (5.03
+  Service Unavailable) or `nabto_coap_server_remove_observer_with_code`,
+  which send the client a final notification with that code and no
+  Observe option (RFC 7641 section 3.2), so the client stops waiting;
+  the observer is freed once that is delivered. Observers
   outlive the request which registered them, so they have their own
   bound: above `nabto_coap_server_limit_observers`
   `nabto_coap_server_request_accept_observe` fails and the handler
   answers with 5.03 Service Unavailable, or serves the request as a
   plain GET.
 - Missing: NON notifications (no API to select them), Max-Age and ETag
-  on notifications, cancelling an observation from the server with an
-  error response.
+  on notifications. `nabto_coap_server_remove_resource` does not end
+  the observations of the resource; the application ends them.
 
 ## Design notes
 

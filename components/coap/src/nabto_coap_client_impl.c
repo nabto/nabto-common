@@ -170,6 +170,14 @@ void nabto_coap_client_handle_callback(struct nabto_coap_client* client)
                 iterator->status = NABTO_COAP_CLIENT_STATUS_OBSERVE_NOTIFICATION;
                 iterator->endHandler(iterator, iterator->endHandlerUserData);
             } else {
+                if (iterator->status == NABTO_COAP_CLIENT_STATUS_OBSERVE_NOTIFICATION) {
+                    // The observation is over: a response without an
+                    // Observe option, such as the error the server ends
+                    // it with (RFC 7641 section 3.2) or the answer to a
+                    // deregistration. Report a completed request, so the
+                    // end handler can tell it from another notification.
+                    iterator->status = NABTO_COAP_CLIENT_STATUS_OK;
+                }
                 iterator->state = NABTO_COAP_CLIENT_REQUEST_STATE_DONE;
                 iterator->endHandler(iterator, iterator->endHandlerUserData);
             }
