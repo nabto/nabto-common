@@ -90,6 +90,20 @@ static void nabto_coap_client_request_send_again(struct nabto_coap_client_reques
     request->retransmissions = 0;
 }
 
+/**
+ * The request is an accepted observe registration and the response it
+ * holds is a notification, so its callback keeps it waiting for the
+ * next one rather than ending it.
+ */
+static bool nabto_coap_client_request_is_observing(struct nabto_coap_client_request* request)
+{
+    return request->isObserve && !request->observeDeregister &&
+        request->response != NULL && request->response->hasObserve &&
+        request->status != NABTO_COAP_CLIENT_STATUS_STOPPED &&
+        request->status != NABTO_COAP_CLIENT_STATUS_TIMEOUT &&
+        request->status != NABTO_COAP_CLIENT_STATUS_RESET;
+}
+
 /********************************************************************
  * Implementation of functions used from the coap client integrator *
  ********************************************************************/
@@ -152,11 +166,7 @@ void nabto_coap_client_handle_callback(struct nabto_coap_client* client)
     struct nabto_coap_client_request* iterator = client->requestsSentinel->next;
     while(iterator != client->requestsSentinel) {
         if (iterator->state == NABTO_COAP_CLIENT_REQUEST_STATE_DONE_CALLBACK) {
-            if (iterator->isObserve && !iterator->observeDeregister &&
-                iterator->response != NULL && iterator->response->hasObserve &&
-                iterator->status != NABTO_COAP_CLIENT_STATUS_STOPPED &&
-                iterator->status != NABTO_COAP_CLIENT_STATUS_TIMEOUT &&
-                iterator->status != NABTO_COAP_CLIENT_STATUS_RESET) {
+            if (nabto_coap_client_request_is_observing(iterator)) {
                 // Observe notification: keep request alive for more
                 // notifications. Only re-arm when the response actually
                 // carries the Observe option — otherwise the server didn't
@@ -440,6 +450,20 @@ enum nabto_coap_client_status nabto_coap_client_handle_request_response(struct n
         request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE)
     {
         // we are waiting for the response, handle it
+        status = nabto_coap_client_parse_and_handle_response(request, message, connection);
+        return status;
+    } else if (request->state == NABTO_COAP_CLIENT_REQUEST_STATE_DONE_CALLBACK &&
+               nabto_coap_client_request_is_observing(request))
+    {
+        // A notification whose callback has not run yet. The previous
+        // one was ACKed when it arrived, which lets the server send the
+        // next one at once, so this one can arrive first; it can also be
+        // a retransmission of the pending one. A RST would cancel the
+        // observation (RFC 7641 section 3.6) while the request goes back
+        // to waiting for notifications that never come. RFC 7641 section
+        // 1.3 only promises the client the most recent state, so the
+        // newer notification replaces the pending one and the callback
+        // delivers it.
         status = nabto_coap_client_parse_and_handle_response(request, message, connection);
         return status;
     } else {
