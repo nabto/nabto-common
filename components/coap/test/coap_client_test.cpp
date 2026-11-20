@@ -74,6 +74,15 @@ class ResponseBuilder {
         BOOST_REQUIRE(ptr_ != NULL);
     }
 
+    // Option 6, so it has to be added before block2 (23).
+    ResponseBuilder& observe(uint32_t sequence)
+    {
+        ptr_ = nabto_coap_encode_varint_option(NABTO_COAP_OPTION_OBSERVE - currentOption_, sequence, ptr_, end());
+        BOOST_REQUIRE(ptr_ != NULL);
+        currentOption_ = NABTO_COAP_OPTION_OBSERVE;
+        return *this;
+    }
+
     ResponseBuilder& block2(uint32_t num, bool more, uint32_t szx)
     {
         ptr_ = nabto_coap_encode_varint_option(NABTO_COAP_OPTION_BLOCK2 - currentOption_, blockOption(num, more, szx), ptr_, end());
@@ -821,6 +830,68 @@ BOOST_AUTO_TEST_CASE(remove_connection_drops_queued_ack_and_rst)
 
         nabto_coap_client_remove_connection(&c.client, c.connection());
         BOOST_TEST(nabto_coap_client_get_next_event(&c.client, c.now) != NABTO_COAP_CLIENT_NEXT_EVENT_SEND);
+    }
+}
+
+// The client ACKs a notification when it arrives and runs the callback
+// afterwards, and the ACK lets the server send the next notification at
+// once. One arriving before the callback had run was answered with a RST,
+// which cancels the observation (RFC 7641 section 3.6), and the request
+// then went back to waiting, with no idle timeout, for notifications the
+// server no longer sends. The newer notification replaces the pending
+// one instead.
+BOOST_AUTO_TEST_CASE(notification_before_the_callback_replaces_the_pending_one)
+{
+    {
+        TestClient c;
+        nabto_coap_client_request_observe(c.request);
+        SentMessage req = c.sendRequest();
+        BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_ACK, NABTO_COAP_CODE_CONTENT, req.messageId, req.token).observe(0).payload("0").build()) == NABTO_COAP_CLIENT_STATUS_OK);
+        BOOST_TEST(c.runCallback());
+        BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_OBSERVE_NOTIFICATION);
+
+        BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_CONTENT, 0x5001, req.token).observe(1).payload("1").build()) == NABTO_COAP_CLIENT_STATUS_OK);
+        std::vector<SentMessage> sent = c.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+        BOOST_TEST(sent[0].messageId == 0x5001);
+
+        // The callback for notification 1 has not run yet.
+        BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_CONTENT, 0x5002, req.token).observe(2).payload("2").build()) == NABTO_COAP_CLIENT_STATUS_OK);
+        sent = c.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+        BOOST_TEST(sent[0].messageId == 0x5002);
+
+        BOOST_TEST(c.runCallback());
+        BOOST_TEST(c.endHandlerCalls == 2u);
+        BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_OBSERVE_NOTIFICATION);
+        struct nabto_coap_client_response* response = nabto_coap_client_request_get_response(c.request);
+        uint32_t observe = 0;
+        BOOST_TEST(nabto_coap_client_response_get_observe(response, &observe));
+        BOOST_TEST(observe == 2u);
+        const uint8_t* payload = NULL;
+        size_t payloadLength = 0;
+        BOOST_REQUIRE(nabto_coap_client_response_get_payload(response, &payload, &payloadLength));
+        BOOST_TEST(std::string((const char*)payload, payloadLength) == "2");
+
+        BOOST_TEST(!c.runCallback());
+        BOOST_TEST(c.request->state == NABTO_COAP_CLIENT_REQUEST_STATE_WAIT_RESPONSE);
+    }
+    {
+        // A request that is not observing still resets a message that
+        // arrives after its response.
+        TestClient c;
+        SentMessage req = c.sendRequest();
+        BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_ACK, NABTO_COAP_CODE_CONTENT, req.messageId, req.token).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+        BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_CONTENT, 0x5003, req.token).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+        std::vector<SentMessage> sent = c.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_RST);
+        BOOST_TEST(sent[0].messageId == 0x5003);
+        BOOST_TEST(c.runCallback());
+        BOOST_TEST(c.endHandlerCalls == 1u);
+        BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_OK);
     }
 }
 

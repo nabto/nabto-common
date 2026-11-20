@@ -134,11 +134,14 @@ until the application sets them.
 
 - `nabto_coap_client_request_observe` registers (Observe=0),
   `nabto_coap_client_request_observe_deregister` deregisters
-  (Observe=1). Every notification is delivered through the end handler
+  (Observe=1). Notifications are delivered through the end handler
   with status `NABTO_COAP_CLIENT_STATUS_OBSERVE_NOTIFICATION` and the
   sequence number is available from
   `nabto_coap_client_response_get_observe`. CON notifications are
-  ACKed and there is no idle timeout while observing.
+  ACKed and there is no idle timeout while observing. A notification
+  arriving before the end handler has run for the previous one
+  replaces it, so the handler sees the most recent state (RFC 7641
+  section 1.3) rather than every notification.
 - Missing: the reordering check of section 3.4 (every notification is
   accepted in the order it arrives) and re-registration based on
   Max-Age.
