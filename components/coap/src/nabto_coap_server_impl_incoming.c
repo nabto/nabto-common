@@ -170,6 +170,11 @@ void nabto_coap_server_handle_packet(struct nabto_coap_server_requests* requests
         struct nabto_coap_server_observer* obs = requests->observersSentinel->next;
         while (obs != requests->observersSentinel) {
             if (nabto_coap_server_observer_notification_in_flight(obs) && obs->connection == connection && obs->messageId == msg.messageId) {
+                if (obs->ending) {
+                    // The final notification arrived, the observation is over.
+                    nabto_coap_server_observer_free(obs);
+                    return;
+                }
                 // Notification was acknowledged, clear in-flight state.
                 struct nabto_coap_server* server = requests->server;
                 if (obs->payload) {

@@ -29,6 +29,13 @@ struct nabto_coap_server_observer {
     size_t payloadLength;
     nabto_coap_type notificationType;
 
+    // The observation is being ended by the server: the current
+    // notification is the final one, an error without an Observe
+    // option (RFC 7641 section 3.2), and the observer is freed when it
+    // is acknowledged, reset or its retransmissions run out. An ending
+    // observer has no resource, so it gets no further notifications.
+    bool ending;
+
     // Pending update: a notification that arrived while the current CON
     // was still waiting for ACK. Coalesced into a single slot — only the
     // most recent update is kept. Promoted to the "current" notification

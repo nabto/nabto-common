@@ -1670,6 +1670,15 @@ BOOST_AUTO_TEST_CASE(observer_removed_while_initial_response_in_flight)
             struct nabto_coap_server_observer* observer = nabto_coap_server_request_get_observer(s.request);
             BOOST_REQUIRE(observer != NULL);
             nabto_coap_server_remove_observer(observer);
+            BOOST_TEST(nabto_coap_server_request_get_observer(s.request) == (struct nabto_coap_server_observer*)NULL);
+            // The client is told the observation is over.
+            sent = s.drain();
+            BOOST_REQUIRE(sent.size() == 1);
+            BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_CON);
+            BOOST_TEST(sent[0].code == NABTO_COAP_CODE_SERVICE_UNAVAILABLE);
+            BOOST_TEST(sent[0].token == "t1");
+            BOOST_TEST(!sent[0].hasObserve);
+            s.handlePacket(ackPacket(sent[0].messageId));
         } else {
             s.handlePacket(rstPacket(sent[0].messageId));
         }
@@ -1748,6 +1757,107 @@ BOOST_AUTO_TEST_CASE(delayed_ack_or_rst_matches_queued_notification_retransmit)
             s.handlePacket(ackPacket(nid));
             BOOST_TEST(s.observerCount() == 1u);
         }
+        BOOST_TEST(s.drain().empty());
+    }
+}
+
+// An observer the server removed was freed without a word to the client,
+// which waits for notifications with no timeout and so waited forever on
+// a live connection. RFC 7641 section 3.2: a notification with a non
+// 2.xx code and no Observe option ends the observation, so that is sent
+// first and the observer is freed when it has been delivered.
+BOOST_AUTO_TEST_CASE(removed_observer_is_sent_a_final_error_notification)
+{
+    TestServer s;
+    s.registerObserver("t1", 0x1501);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    struct nabto_coap_server_observer* observer = s.requests.observersSentinel->next;
+
+    nabto_coap_server_remove_observer_with_code(observer, NABTO_COAP_CODE_FORBIDDEN);
+    // No longer notified.
+    const std::string notification = "hello";
+    BOOST_REQUIRE(nabto_coap_server_resource_notify(&s.requests, s.getResource, NABTO_COAP_CODE_CONTENT, 0, notification.data(), notification.size()) == NABTO_COAP_ERROR_OK);
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_CON);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_FORBIDDEN);
+    BOOST_TEST(sent[0].token == "t1");
+    BOOST_TEST(!sent[0].hasObserve);
+    BOOST_TEST(sent[0].payload.empty());
+    BOOST_TEST(s.observerCount() == 1u);
+
+    s.handlePacket(ackPacket(sent[0].messageId));
+    BOOST_TEST(s.observerCount() == 0u);
+    BOOST_TEST(s.requests.activeObservers == 0u);
+    BOOST_TEST(s.drain().empty());
+}
+
+// The final notification supersedes a notification still in flight: a
+// late ACK for that one does not end anything, the final one's does.
+BOOST_AUTO_TEST_CASE(final_notification_supersedes_one_in_flight)
+{
+    TestServer s;
+    s.registerObserver("t1", 0x1601);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    struct nabto_coap_server_observer* observer = s.requests.observersSentinel->next;
+
+    const std::string notification = "hello";
+    BOOST_REQUIRE(nabto_coap_server_resource_notify(&s.requests, s.getResource, NABTO_COAP_CODE_CONTENT, 0, notification.data(), notification.size()) == NABTO_COAP_ERROR_OK);
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    uint16_t inFlight = sent[0].messageId;
+    // A pending update queued behind it is dropped.
+    BOOST_REQUIRE(nabto_coap_server_resource_notify(&s.requests, s.getResource, NABTO_COAP_CODE_CONTENT, 0, notification.data(), notification.size()) == NABTO_COAP_ERROR_OK);
+
+    nabto_coap_server_remove_observer(observer);
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_SERVICE_UNAVAILABLE);
+    BOOST_TEST(!sent[0].hasObserve);
+    BOOST_TEST(sent[0].messageId != inFlight);
+
+    s.handlePacket(ackPacket(inFlight));
+    BOOST_TEST(s.observerCount() == 1u);
+    BOOST_TEST(s.drain().empty());
+    s.handlePacket(ackPacket(sent[0].messageId));
+    BOOST_TEST(s.observerCount() == 0u);
+}
+
+// The final notification is retransmitted like any CON notification; a
+// RST or running out of retransmissions frees the observer as well, and
+// so does removing the connection before it is sent.
+BOOST_AUTO_TEST_CASE(final_notification_ends_on_rst_timeout_or_connection_removal)
+{
+    for (int how = 0; how < 3; how++) {
+        TestServer s;
+        s.registerObserver("t1", 0x1701);
+        s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+        s.request = NULL;
+        nabto_coap_server_remove_observer(s.requests.observersSentinel->next);
+        if (how == 2) {
+            nabto_coap_server_remove_connection(&s.requests, s.connection());
+            BOOST_TEST(s.observerCount() == 0u);
+            BOOST_TEST(nabto_coap_server_next_event(&s.requests) == NABTO_COAP_SERVER_NEXT_EVENT_NOTHING);
+            continue;
+        }
+        std::vector<SentMessage> sent = s.drain();
+        BOOST_REQUIRE(sent.size() == 1);
+        uint16_t finalId = sent[0].messageId;
+        if (how == 0) {
+            s.handlePacket(rstPacket(finalId));
+        } else {
+            for (int i = 0; i < NABTO_COAP_MAX_RETRANSMITS; i++) {
+                s.timeoutTick();
+                sent = s.drain();
+                BOOST_REQUIRE(sent.size() == 1);
+                BOOST_TEST(sent[0].messageId == finalId);
+                BOOST_TEST(!sent[0].hasObserve);
+            }
+            s.timeoutTick();
+        }
+        BOOST_TEST(s.observerCount() == 0u);
         BOOST_TEST(s.drain().empty());
     }
 }

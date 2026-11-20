@@ -210,9 +210,23 @@ nabto_coap_error nabto_coap_server_resource_notify(
     size_t payloadLength);
 
 /**
- * Remove a specific observer.
+ * End an observation from the server, with 5.03 Service Unavailable.
+ * Same as nabto_coap_server_remove_observer_with_code.
  */
 void nabto_coap_server_remove_observer(struct nabto_coap_server_observer* observer);
+
+/**
+ * End an observation from the server. The client is sent a final
+ * notification with the given code, which should be an error such as
+ * 4.03 Forbidden when access was revoked, and no Observe option, so it
+ * learns that the observation is over (RFC 7641 section 3.2). The
+ * observer gets no further notifications and is freed once the final
+ * one is acknowledged, reset or its retransmissions run out, or when
+ * its connection is removed; until then it counts against
+ * nabto_coap_server_limit_observers. The handle is invalid after this
+ * call, and nabto_coap_server_request_get_observer returns NULL.
+ */
+void nabto_coap_server_remove_observer_with_code(struct nabto_coap_server_observer* observer, nabto_coap_code code);
 
 /**
  * handle packets and events

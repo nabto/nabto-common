@@ -561,9 +561,12 @@ static uint8_t* nabto_coap_server_send_observer_notification(struct nabto_coap_s
 
     uint16_t currentOption = 0;
 
-    // Observe option (6)
-    ptr = nabto_coap_encode_varint_option(NABTO_COAP_OPTION_OBSERVE - currentOption, observer->sequenceNumber, ptr, end);
-    currentOption = NABTO_COAP_OPTION_OBSERVE;
+    // Observe option (6). The final notification of an observation the
+    // server ends carries none (RFC 7641 section 3.2).
+    if (!observer->ending) {
+        ptr = nabto_coap_encode_varint_option(NABTO_COAP_OPTION_OBSERVE - currentOption, observer->sequenceNumber, ptr, end);
+        currentOption = NABTO_COAP_OPTION_OBSERVE;
+    }
 
     // Content-Format option (12)
     if (observer->hasContentFormat) {
@@ -997,16 +1000,12 @@ void nabto_coap_server_observer_remove_from_list(struct nabto_coap_server_observ
     observer->prev = observer;
 }
 
-void nabto_coap_server_observer_free(struct nabto_coap_server_observer* observer)
+// The request which registered the observer may still be alive,
+// retransmitting its initial response or held by the application. It
+// must not hand out an observer which is freed or being ended.
+static void nabto_coap_server_observer_detach_requests(struct nabto_coap_server_observer* observer)
 {
     struct nabto_coap_server_requests* requests = observer->requests;
-    struct nabto_coap_server* server = requests->server;
-    nabto_coap_server_observer_remove_from_list(observer);
-    requests->activeObservers--;
-
-    // The request which registered the observer may still be alive,
-    // retransmitting its initial response or held by the application,
-    // and would otherwise keep pointing at freed memory.
     struct nabto_coap_server_request* request = requests->requestsSentinel->next;
     while (request != requests->requestsSentinel) {
         if (request->observer == observer) {
@@ -1014,6 +1013,16 @@ void nabto_coap_server_observer_free(struct nabto_coap_server_observer* observer
         }
         request = request->next;
     }
+}
+
+void nabto_coap_server_observer_free(struct nabto_coap_server_observer* observer)
+{
+    struct nabto_coap_server_requests* requests = observer->requests;
+    struct nabto_coap_server* server = requests->server;
+    nabto_coap_server_observer_remove_from_list(observer);
+    requests->activeObservers--;
+
+    nabto_coap_server_observer_detach_requests(observer);
 
     if (observer->payload) {
         server->allocator.free(observer->payload);
@@ -1192,7 +1201,48 @@ struct nabto_coap_server_observer* nabto_coap_server_request_get_observer(struct
 
 void nabto_coap_server_remove_observer(struct nabto_coap_server_observer* observer)
 {
-    nabto_coap_server_observer_free(observer);
+    nabto_coap_server_remove_observer_with_code(observer, NABTO_COAP_CODE_SERVICE_UNAVAILABLE);
+}
+
+void nabto_coap_server_remove_observer_with_code(struct nabto_coap_server_observer* observer, nabto_coap_code code)
+{
+    if (observer->ending) {
+        // The final notification is already on its way.
+        return;
+    }
+    struct nabto_coap_server_requests* requests = observer->requests;
+    struct nabto_coap_server* server = requests->server;
+
+    nabto_coap_server_observer_detach_requests(observer);
+
+    // RFC 7641 section 3.2: a notification with a response code other
+    // than 2.xx and no Observe option ends the observation at the
+    // client. Freeing the observer silently left the client waiting,
+    // without a timeout, for notifications that never came. The final
+    // notification supersedes one still in flight, whose retransmission
+    // stops, and any pending update is dropped.
+    if (observer->payload) {
+        server->allocator.free(observer->payload);
+        observer->payload = NULL;
+    }
+    observer->payloadLength = 0;
+    if (observer->pendingPayload) {
+        server->allocator.free(observer->pendingPayload);
+        observer->pendingPayload = NULL;
+    }
+    observer->pendingPayloadLength = 0;
+    observer->pendingValid = false;
+
+    observer->ending = true;
+    observer->resource = NULL;
+    observer->code = code;
+    observer->hasContentFormat = false;
+    observer->notificationType = NABTO_COAP_TYPE_CON;
+    observer->messageId = nabto_coap_server_next_message_id(requests);
+    observer->retransmissions = 0;
+    observer->waitingForAck = false;
+    observer->sendNow = true;
+    requests->notifyEvent(requests->userData);
 }
 
 void nabto_coap_server_remove_connection(struct nabto_coap_server_requests* requests, void* connection)

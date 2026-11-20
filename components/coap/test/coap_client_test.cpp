@@ -517,6 +517,49 @@ BOOST_AUTO_TEST_CASE(block2_error_releases_reassembled_payload)
     }
 }
 
+// A response with an Observe option, as a registration answer or a
+// notification is, sent with the request's token.
+std::vector<uint8_t> observePacket(nabto_coap_type type, nabto_coap_code code, uint16_t messageId, const nabto_coap_token& token, uint32_t sequence)
+{
+    uint8_t buffer[64];
+    struct nabto_coap_message_header header;
+    memset(&header, 0, sizeof(header));
+    header.type = type;
+    header.code = code;
+    header.messageId = messageId;
+    header.token = token;
+    uint8_t* ptr = nabto_coap_encode_header(&header, buffer, buffer + sizeof(buffer));
+    ptr = nabto_coap_encode_varint_option(NABTO_COAP_OPTION_OBSERVE, sequence, ptr, buffer + sizeof(buffer));
+    BOOST_REQUIRE(ptr != NULL);
+    return std::vector<uint8_t>(buffer, ptr);
+}
+
+// RFC 7641 section 3.2: the server ends an observation with an error
+// notification without an Observe option. The request ends with it, and
+// its status is OK rather than the OBSERVE_NOTIFICATION the earlier
+// notifications left behind, so the end handler can tell the two apart.
+BOOST_AUTO_TEST_CASE(error_notification_ends_the_observation)
+{
+    TestClient c;
+    nabto_coap_client_request_observe(c.request);
+    SentMessage req = c.sendRequest();
+    BOOST_TEST(c.handlePacket(observePacket(NABTO_COAP_TYPE_ACK, NABTO_COAP_CODE_CONTENT, req.messageId, req.token, 0)) == NABTO_COAP_CLIENT_STATUS_OK);
+    BOOST_TEST(c.runCallback());
+    BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_OBSERVE_NOTIFICATION);
+
+    BOOST_TEST(c.handlePacket(ResponseBuilder(NABTO_COAP_TYPE_CON, NABTO_COAP_CODE_FORBIDDEN, 0x5101, req.token).build()) == NABTO_COAP_CLIENT_STATUS_OK);
+    std::vector<SentMessage> sent = c.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_ACK);
+    BOOST_TEST(sent[0].messageId == 0x5101);
+    BOOST_TEST(c.runCallback());
+    BOOST_TEST(c.endHandlerCalls == 2u);
+    BOOST_TEST(c.endStatus == NABTO_COAP_CLIENT_STATUS_OK);
+    BOOST_TEST(nabto_coap_client_response_get_code(nabto_coap_client_request_get_response(c.request)) == 403);
+    BOOST_TEST(c.request->state == NABTO_COAP_CLIENT_REQUEST_STATE_DONE);
+    BOOST_TEST(nabto_coap_client_get_next_event(&c.client, c.now) == NABTO_COAP_CLIENT_NEXT_EVENT_NOTHING);
+}
+
 // Audit M7 (sc-4821): a RST completed the request without setting a
 // status, so it reported OK with no response.
 BOOST_AUTO_TEST_CASE(rst_completes_request_with_reset_status)
