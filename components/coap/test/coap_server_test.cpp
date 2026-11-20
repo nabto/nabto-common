@@ -2093,4 +2093,47 @@ BOOST_AUTO_TEST_CASE(accept_observe_after_connection_removed_is_refused)
     BOOST_TEST(s.requests.activeRequests == 0u);
 }
 
+// RFC 7641 section 4.4: the Observe value is a 24 bit sequence number.
+// It was incremented without wrapping, so after 2^24 notifications to
+// one observer (about 194 days at one a second) the option took four
+// bytes, which section 2 does not allow. Receivers, our own client among
+// them, rejected every notification from then on, and the observer was
+// removed once its retransmissions ran out.
+BOOST_AUTO_TEST_CASE(observe_sequence_number_wraps_at_24_bits)
+{
+    TestServer s;
+    s.registerObserver("t1", 0x1401);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    struct nabto_coap_server_observer* observer = s.requests.observersSentinel->next;
+    BOOST_REQUIRE(observer != s.requests.observersSentinel);
+    observer->sequenceNumber = 0xFFFFFE;
+
+    const std::string notification = "hello";
+    BOOST_REQUIRE(nabto_coap_server_resource_notify(&s.requests, s.getResource, NABTO_COAP_CODE_CONTENT, 0, notification.data(), notification.size()) == NABTO_COAP_ERROR_OK);
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].hasObserve);
+    BOOST_TEST(sent[0].observe == 0xFFFFFFu);
+
+    // Sent directly.
+    s.handlePacket(ackPacket(sent[0].messageId));
+    BOOST_REQUIRE(nabto_coap_server_resource_notify(&s.requests, s.getResource, NABTO_COAP_CODE_CONTENT, 0, notification.data(), notification.size()) == NABTO_COAP_ERROR_OK);
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].hasObserve);
+    BOOST_TEST(sent[0].observe == 0u);
+
+    // Promoted from the pending slot when the one in flight is acked.
+    observer->sequenceNumber = 0xFFFFFF;
+    BOOST_REQUIRE(nabto_coap_server_resource_notify(&s.requests, s.getResource, NABTO_COAP_CODE_CONTENT, 0, notification.data(), notification.size()) == NABTO_COAP_ERROR_OK);
+    s.handlePacket(ackPacket(sent[0].messageId));
+    sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].hasObserve);
+    BOOST_TEST(sent[0].observe == 0u);
+    s.handlePacket(ackPacket(sent[0].messageId));
+    BOOST_TEST(s.observerCount() == 1u);
+}
+
 BOOST_AUTO_TEST_SUITE_END()
