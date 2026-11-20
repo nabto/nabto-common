@@ -157,7 +157,11 @@ until the application sets them.
   Service Unavailable) or `nabto_coap_server_remove_observer_with_code`,
   which send the client a final notification with that code and no
   Observe option (RFC 7641 section 3.2), so the client stops waiting;
-  the observer is freed once that is delivered. Observers
+  the observer is freed once that is delivered. Notifications are not
+  sent block-wise (RFC 7959 section 3.4), so one whose payload does
+  not fit the send buffer ends the observation the same way, with
+  5.03; the client can register again and receive the representation
+  block-wise in the response. Observers
   outlive the request which registered them, so they have their own
   bound: above `nabto_coap_server_limit_observers`
   `nabto_coap_server_request_accept_observe` fails and the handler

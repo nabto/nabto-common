@@ -575,13 +575,25 @@ static uint8_t* nabto_coap_server_send_observer_notification(struct nabto_coap_s
         currentOption = NABTO_COAP_OPTION_CONTENT_FORMAT;
     }
 
+    if (ptr == NULL) {
+        // Not even the header fits. Leave observer state unchanged so
+        // the caller can retry on a larger buffer.
+        return NULL;
+    }
+
     // Payload
     ptr = nabto_coap_encode_payload(observer->payload, observer->payloadLength, ptr, end);
 
     if (ptr == NULL) {
-        // Encoding failed (e.g., buffer too small). Leave observer state
-        // unchanged so the caller can retry on a larger buffer.
-        return NULL;
+        // The payload does not fit. Notifications are not sent
+        // block-wise, so it never will, and keeping it queued blocked
+        // every later send on this requests context. End the
+        // observation instead; the client can register again and get
+        // the representation block-wise in the response. The final
+        // notification has no payload and fewer options than the
+        // header that just fitted.
+        nabto_coap_server_remove_observer(observer);
+        return nabto_coap_server_send_observer_notification(requests, observer, buffer, end);
     }
 
     if (observer->notificationType == NABTO_COAP_TYPE_CON) {
