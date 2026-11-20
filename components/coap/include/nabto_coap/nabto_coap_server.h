@@ -190,7 +190,8 @@ nabto_coap_error nabto_coap_server_request_accept_observe(struct nabto_coap_serv
  * Returns NULL if the request was not accepted as an observe
  * registration, or if the observer has since been removed (by
  * nabto_coap_server_remove_observer, a RST from the client, retransmits
- * exhausted, or the connection being removed). Those events invalidate
+ * exhausted, a notification too large to send, or the connection being
+ * removed). Those events invalidate
  * a handle obtained earlier, so call this again instead of caching the
  * handle. The returned pointer can be passed to
  * nabto_coap_server_remove_observer().
@@ -200,6 +201,9 @@ struct nabto_coap_server_observer* nabto_coap_server_request_get_observer(struct
 /**
  * Push a notification to all observers of a resource.
  * Each observer receives a CON message with the given payload.
+ * Notifications are not sent block-wise: if the notification does not
+ * fit the buffer given to nabto_coap_server_handle_send, the
+ * observation is ended as by nabto_coap_server_remove_observer.
  */
 nabto_coap_error nabto_coap_server_resource_notify(
     struct nabto_coap_server_requests* requests,

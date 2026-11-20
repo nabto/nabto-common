@@ -1862,6 +1862,66 @@ BOOST_AUTO_TEST_CASE(final_notification_ends_on_rst_timeout_or_connection_remova
     }
 }
 
+// Notifications are not sent block-wise. One larger than the send
+// buffer stayed queued forever: next_event kept asking for a send that
+// always failed, and every observer after it starved. The observation
+// is ended instead, so the other observer is still notified.
+BOOST_AUTO_TEST_CASE(notification_larger_than_the_send_buffer_ends_the_observation)
+{
+    TestServer s;
+    s.registerObserver("t1", 0x1801);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    s.registerObserver("t2", 0x1802);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+    // Observers are inserted at the front; give the first in the list,
+    // the one handle_send reaches first, the oversized notification.
+    struct nabto_coap_server_observer* oversized = s.requests.observersSentinel->next;
+    oversized->resource = s.postResource;
+
+    const std::string large(2000, 'x');
+    const std::string small = "hello";
+    BOOST_REQUIRE(nabto_coap_server_resource_notify(&s.requests, s.postResource, NABTO_COAP_CODE_CONTENT, 0, large.data(), large.size()) == NABTO_COAP_ERROR_OK);
+    BOOST_REQUIRE(nabto_coap_server_resource_notify(&s.requests, s.getResource, NABTO_COAP_CODE_CONTENT, 0, small.data(), small.size()) == NABTO_COAP_ERROR_OK);
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 2);
+    BOOST_TEST(sent[0].token == "t2");
+    BOOST_TEST(sent[0].type == NABTO_COAP_TYPE_CON);
+    BOOST_TEST(sent[0].code == NABTO_COAP_CODE_SERVICE_UNAVAILABLE);
+    BOOST_TEST(!sent[0].hasObserve);
+    BOOST_TEST(sent[0].payload.empty());
+    BOOST_TEST(sent[1].token == "t1");
+    BOOST_TEST(sent[1].hasObserve);
+    BOOST_TEST(sent[1].payload == small);
+
+    s.handlePacket(ackPacket(sent[0].messageId));
+    s.handlePacket(ackPacket(sent[1].messageId));
+    BOOST_TEST(s.observerCount() == 1u);
+    BOOST_TEST(s.drain().empty());
+}
+
+// A buffer too small for even the header is the integrator's to fix, as
+// for any other reply: the notification stays queued for a retry.
+BOOST_AUTO_TEST_CASE(notification_is_kept_when_its_header_does_not_fit)
+{
+    TestServer s;
+    s.registerObserver("t1", 0x1901);
+    s.respond(s.request, NABTO_COAP_CODE_CONTENT);
+    s.request = NULL;
+
+    const std::string notification = "hello";
+    BOOST_REQUIRE(nabto_coap_server_resource_notify(&s.requests, s.getResource, NABTO_COAP_CODE_CONTENT, 0, notification.data(), notification.size()) == NABTO_COAP_ERROR_OK);
+    BOOST_TEST(s.sendInto(2) == (uint8_t*)NULL);
+    BOOST_TEST(nabto_coap_server_next_event(&s.requests) == NABTO_COAP_SERVER_NEXT_EVENT_SEND);
+    std::vector<SentMessage> sent = s.drain();
+    BOOST_REQUIRE(sent.size() == 1);
+    BOOST_TEST(sent[0].hasObserve);
+    BOOST_TEST(sent[0].payload == notification);
+    s.handlePacket(ackPacket(sent[0].messageId));
+    BOOST_TEST(s.observerCount() == 1u);
+}
+
 // Audit N2 (sc-4859): observers outlive their request, so they have a
 // limit of their own. At the limit a fresh registration is refused and
 // the request is answered as a plain GET; re-registering a token that
