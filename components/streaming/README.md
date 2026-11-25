@@ -58,8 +58,10 @@ fresh nonce under the same stream id; the initiator drops it, since a
 nonce response would establish that stream. A later syn|ack with the
 nonce already accepted is a retransmission and is answered.
 
-The nonce must be fresh and random for each stream; generating it is
-the responsibility of the caller of `nabto_stream_init_responder`.
+The nonce must be unique among the streams of a connection for the
+lifetime of that connection; it does not need to be random, so a
+per-connection counter is sufficient. Generating it is the
+responsibility of the caller of `nabto_stream_init_responder`.
 
 ## Tests
 
